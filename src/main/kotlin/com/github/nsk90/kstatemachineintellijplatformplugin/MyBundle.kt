@@ -1,4 +1,4 @@
-package org.jetbrains.plugins.template
+package com.github.nsk90.kstatemachineintellijplatformplugin
 
 import com.intellij.DynamicBundle
 import org.jetbrains.annotations.NonNls
