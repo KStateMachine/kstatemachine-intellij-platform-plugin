@@ -1,10 +1,11 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.nsk90.kstatemachineintellijplatformplugin</id>
-    <name>kstatemachine-intellij-platform-plugin</name>
+    <name>KStateMachine Visual</name>
     <vendor>nsk90</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
