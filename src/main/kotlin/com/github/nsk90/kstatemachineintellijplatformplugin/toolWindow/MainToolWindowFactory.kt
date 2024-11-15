@@ -4,28 +4,19 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
-import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBPanel
 import com.intellij.ui.content.ContentFactory
-import com.github.nsk90.kstatemachineintellijplatformplugin.MyBundle
 import com.github.nsk90.kstatemachineintellijplatformplugin.services.FileSwitchService
-import com.intellij.openapi.application.Application
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
-import com.intellij.psi.PsiMethodCallExpression
-import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.psi.search.PsiSearchHelper
-import com.intellij.psi.search.UsageSearchContext
 import com.intellij.psi.util.PsiTreeUtil
-import com.intellij.psi.util.elementType
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import kotlinx.coroutines.CoroutineScope
@@ -33,8 +24,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.jetbrains.kotlin.idea.completion.argList
 import org.jetbrains.kotlin.psi.KtCallExpression
-import javax.swing.JButton
 import javax.swing.JTextArea
 
 private const val CREATE_FUNCTIONS_PREFIX = "createStateMachine"
@@ -44,6 +35,37 @@ private val createStateMachineFunctions = listOf(
     "createStateMachineBlocking",
     "createStdLibStateMachine",
 )
+
+private val stateFactoryFunctions = listOf(
+    "state",
+    "dataState",
+    "initialState",
+    "initialDataState",
+    "finalDataState",
+    "initialFinalDataState",
+    "choiceState",
+    "initialChoiceState",
+    "initialChoiceState",
+    "choiceDataState",
+    "initialChoiceDataState",
+    "historyState",
+)
+
+private val addStateFunctions = listOf(
+    "addState",
+    "addInitialState",
+    "addFinalState",
+)
+
+private val transitionFunctions = listOf(
+    "transition",
+    "transitionOn",
+    "transitionConditionally",
+    "dataTransition",
+    "dataTransitionOn",
+)
+
+private val stateFunctions = stateFactoryFunctions + addStateFunctions
 
 class MainToolWindowFactory : ToolWindowFactory {
     private lateinit var project: Project
@@ -75,7 +97,7 @@ class MainToolWindowFactory : ToolWindowFactory {
 
     private fun runTaskWithProgress(project: Project, block: () -> Unit) {
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Task name") {
-            override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
+            override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 indicator.text = "Processing something..."
                 block()
@@ -103,15 +125,40 @@ class MainToolWindowFactory : ToolWindowFactory {
         runTaskWithProgress(project) {
             runReadAction {
                 val psiFile = PsiManager.getInstance(project).findFile(file) ?: error("Can't find file ${file.path}")
-
-                findMethodCallsInFile(psiFile, createStateMachineFunctions).forEach {
+                // build psi tree for dsl statemachine structure
+                findMethodCallsInElement(psiFile, createStateMachineFunctions).forEach {
                     logMessage("Found method call: ${it.calleeExpression?.text}")
+                    // should go as deep as possible, and protect from duplicates
+                    findMethodCallsInElement(it, stateFunctions).forEach {
+                        logMessage("Found method call: ${it.calleeExpression?.text}, ${printArgumentValueByNameOrIndex(it, "name", 0)}")
+                    }
+                    findMethodCallsInElement(it, transitionFunctions).forEach {
+                        logMessage("Found method call: ${it.calleeExpression?.text}, ${printArgumentValueByNameOrIndex(it, "name", 0)}")
+                    }
                 }
             }
         }
     }
 
-    private fun findMethodCallsInFile(element: PsiElement, names: List<String>): List<KtCallExpression> {
+    private fun printArgumentValueByNameOrIndex(callExpression: KtCallExpression, argumentName: String, index: Int): String {
+        // Search by name
+        val argument = callExpression.valueArguments.find {
+            it.getArgumentName()?.asName?.asString() == argumentName
+        }
+        if (argument != null) {
+             return "$argumentName: ${argument.getArgumentExpression()?.text}"
+        }
+        // Search by positional index
+        val arguments = callExpression.valueArguments
+        if (index in arguments.indices) {
+            val argumentValue = arguments[index].getArgumentExpression()?.text ?: "null"
+            return argumentValue
+        } else {
+            return "No argument found at index: $index"
+        }
+    }
+
+    private fun findMethodCallsInElement(element: PsiElement, names: List<String>): List<KtCallExpression> {
         return PsiTreeUtil.findChildrenOfType(element, KtCallExpression::class.java).mapNotNull {
             it.takeIf { names.contains(it.calleeExpression?.text) }
         }
