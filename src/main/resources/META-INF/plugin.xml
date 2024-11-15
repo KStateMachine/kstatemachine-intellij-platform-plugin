@@ -6,11 +6,12 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
+    <depends>org.jetbrains.kotlin</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.MainToolWindowFactory" id="MyToolWindow"/>
     </extensions>
 
     <applicationListeners>
