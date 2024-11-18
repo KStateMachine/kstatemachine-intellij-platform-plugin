@@ -18,7 +18,7 @@
 
 <!-- Plugin description -->
 KStateMachine Visual is an official IDE plugin for KStateMachine state charts visualization and management.
-It is a part of KStateMachine library.
+It is a part of [KStateMachine](https://github.com/KStateMachine/kstatemachine) library.
 
 The project is just strarted, there is nothing usable yet.
 <!-- Plugin description end -->
