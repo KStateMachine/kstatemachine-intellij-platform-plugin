@@ -1,6 +1,6 @@
 <!-- Keep a Changelog guide -> https://keepachangelog.com -->
 
-# kstatemachine-intellij-platform-plugin Changelog
+# KStateMachine Visual Changelog
 
 ## [Unreleased]
 ### Added

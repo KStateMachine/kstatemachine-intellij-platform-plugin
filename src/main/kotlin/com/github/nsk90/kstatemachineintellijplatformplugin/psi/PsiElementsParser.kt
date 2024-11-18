@@ -1,5 +1,8 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.State
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.util.PsiTreeUtil
@@ -50,41 +53,49 @@ private val transitionFunctions = listOf(
     "dataTransitionOn",
 )
 
-private val NAME_ARGUMENT = "name"
+private const val NAME_ARGUMENT = "name"
 
 private val stateFunctions = stateFactoryFunctions + addStateFunctions
-
 
 fun interface Output {
     fun write(message: String)
 }
 
 class PsiElementsParser(private val output: Output) {
-    fun parse(psiFile: PsiFile) {
+    fun parse(psiFile: PsiFile): List<StateMachine> {
         // build psi tree for dsl statemachine structure
-        findMethodCallsInElement(psiFile, createStateMachineFunctions).forEach {
-            output.write("Found method call: ${it.calleeExpression?.text}")
+        val stateMachines = mutableListOf<StateMachine>()
+        // todo support nested machines
+        findMethodCallsInElement(psiFile, createStateMachineFunctions).forEach { stateMachineExpression ->
+            output.write("Found method call: ${stateMachineExpression.calleeExpression?.text}")
+            val nameArgument = requireNotNull(findArgumentValueWithDefaults(stateMachineExpression, NAME_ARGUMENT)) {
+                "No state machine Name argument found"
+            }
             // should go as deep as possible, and protect from duplicates
-            findMethodCallsInElement(it, stateFunctions).forEach {
-                val argument = findArgumentValueWithDefaults(it, NAME_ARGUMENT)
-                val message = if (argument != null)
-                    argument
-                else
-                    "No argument found"
-
-                output.write("Found method call: ${it.calleeExpression?.text} $message")
+            val states = mutableListOf<State>()
+            findMethodCallsInElement(stateMachineExpression, stateFunctions).forEach { stateExpression ->
+                val nameArgument = requireNotNull(findArgumentValueWithDefaults(stateExpression, NAME_ARGUMENT)) {
+                    "No state Name argument found"
+                }
+                output.write("Found method call: ${stateExpression.calleeExpression?.text} $nameArgument")
+                states += State(nameArgument, emptyList(), emptyList())
             }
-            findMethodCallsInElement(it, transitionFunctions).forEach {
-                val argument = findArgumentValueWithDefaults(it, NAME_ARGUMENT)
-                val message = if (argument != null)
-                    argument
-                else
-                    "No argument found"
-                output.write("Found method call: ${it.calleeExpression?.text} $message")
+            val transitions = mutableListOf<Transition>()
+            findMethodCallsInElement(stateMachineExpression, transitionFunctions).forEach { transitionExpression ->
+                val nameArgument = requireNotNull(findArgumentValueWithDefaults(transitionExpression, NAME_ARGUMENT)) {
+                    "No transition Name argument found"
+                }
+                output.write("Found method call: ${transitionExpression.calleeExpression?.text} $nameArgument")
+                transitions += Transition(nameArgument)
             }
+            stateMachines += StateMachine(nameArgument, states, transitions)
         }
+        return stateMachines
     }
 
+    /**
+     * todo add imports validation
+     */
     private fun findMethodCallsInElement(element: PsiElement, names: List<String>): List<KtCallExpression> {
         return PsiTreeUtil.findChildrenOfType(element, KtCallExpression::class.java).mapNotNull {
             it.takeIf { names.contains(it.calleeExpression?.text) }

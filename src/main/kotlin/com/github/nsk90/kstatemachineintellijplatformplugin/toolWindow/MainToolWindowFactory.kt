@@ -93,8 +93,13 @@ class MainToolWindowFactory : ToolWindowFactory {
     private fun onFileSwitched(file: VirtualFile) {
         runTaskWithProgress(project) {
             runReadAction {
-                val psiFile = PsiManager.getInstance(project).findFile(file) ?: error("Can't find file ${file.path}")
-                PsiElementsParser(Output { logMessage(it) }).parse(psiFile)
+                try {
+                    val psiFile =
+                        PsiManager.getInstance(project).findFile(file) ?: error("Can't find file ${file.path}")
+                    PsiElementsParser(Output { logMessage(it) }).parse(psiFile)
+                } catch (e: Exception) {
+                    logMessage("Error: $e, ${e.localizedMessage}")
+                }
             }
         }
     }
