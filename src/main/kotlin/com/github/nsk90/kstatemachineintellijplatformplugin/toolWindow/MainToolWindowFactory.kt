@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.jetbrains.kotlin.psi.KtFile
 import javax.swing.JTextArea
 
 private const val BACKGROUND_TASK_NAME = "Looking for state machines"
@@ -94,11 +95,12 @@ class MainToolWindowFactory : ToolWindowFactory {
         runTaskWithProgress(project) {
             runReadAction {
                 try {
-                    val psiFile =
-                        PsiManager.getInstance(project).findFile(file) ?: error("Can't find file ${file.path}")
-                    PsiElementsParser(Output { logMessage(it) }).parse(psiFile)
+                    val psiFile = PsiManager.getInstance(project).findFile(file)
+                        ?: error("Can't find file ${file.path}")
+                    if (psiFile is KtFile)
+                        PsiElementsParser(Output { logMessage(it) }).parse(psiFile)
                 } catch (e: Exception) {
-                    logMessage("Error: $e, ${e.localizedMessage}")
+                    logMessage("Error: $e")
                 }
             }
         }
@@ -115,8 +117,6 @@ class MainToolWindowFactory : ToolWindowFactory {
 //        // Compare with the expected fully qualified name
 //        return fqName == expectedFqName
 //    }
-
-
 
 //    private class MyToolWindow(private val toolWindow: ToolWindow, private val text: String) {
 //
