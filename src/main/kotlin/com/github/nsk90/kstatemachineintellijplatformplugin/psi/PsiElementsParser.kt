@@ -66,10 +66,17 @@ fun interface Output {
     fun write(message: String)
 }
 
+
+
 class PsiElementsParser(private val output: Output) {
     fun parse(psiFile: KtFile): List<StateMachine> {
         val bindingContext = psiFile.analyze()
-        buildStateMachinesTree(psiFile, bindingContext)
+        val machines = buildStateMachinesTree(psiFile, bindingContext)
+        output.write(">>>")
+        machines.forEach { machine ->
+            machine.print(0)
+        }
+        output.write("<<<")
 
         // build psi tree for dsl statemachine structure
         val stateMachines = mutableListOf<StateMachine>()
@@ -107,6 +114,15 @@ class PsiElementsParser(private val output: Output) {
             stateMachines += StateMachine(nameArgument, states, transitions)
         }
         return stateMachines
+    }
+
+    private fun State.print(level: Int) {
+        val indent = "  ".repeat(level)
+        output.write("$indent ${this::class.simpleName} name=$name")
+        transitions.forEach {
+            output.write("$indent ${it::class.simpleName} name=${it.name}")
+        }
+        states.forEach { print(level + 1) }
     }
 }
 
