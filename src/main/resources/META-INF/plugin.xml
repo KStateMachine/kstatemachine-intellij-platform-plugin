@@ -11,10 +11,12 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.MainToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.MainToolWindowFactory"
+                    id="MyToolWindow"/>
     </extensions>
 
     <applicationListeners>
-        <listener class="com.github.nsk90.kstatemachineintellijplatformplugin.listeners.MyApplicationActivationListener" topic="com.intellij.openapi.application.ApplicationActivationListener"/>
+        <listener class="com.github.nsk90.kstatemachineintellijplatformplugin.listeners.MyApplicationActivationListener"
+                  topic="com.intellij.openapi.application.ApplicationActivationListener"/>
     </applicationListeners>
 </idea-plugin>
