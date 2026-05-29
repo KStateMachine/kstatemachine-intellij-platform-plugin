@@ -92,6 +92,8 @@ class MainToolWindowFactory : ToolWindowFactory {
     }
 
     private fun onFileSwitched(file: VirtualFile) {
+        ApplicationManager.getApplication().invokeLater { logTextArea.text = "" }
+        logMessage("=== ${file.name} ===")
         runTaskWithProgress(project) {
             runReadAction {
                 try {
