@@ -12,11 +12,8 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow factoryClass="com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.MainToolWindowFactory"
-                    id="MyToolWindow"/>
+                    id="KStateMachine"/>
+        <codeInsight.lineMarkerProvider language="kotlin"
+                                        implementationClass="com.github.nsk90.kstatemachineintellijplatformplugin.psi.StateMachineLineMarkerProvider"/>
     </extensions>
-
-    <applicationListeners>
-        <listener class="com.github.nsk90.kstatemachineintellijplatformplugin.listeners.MyApplicationActivationListener"
-                  topic="com.intellij.openapi.application.ApplicationActivationListener"/>
-    </applicationListeners>
 </idea-plugin>
