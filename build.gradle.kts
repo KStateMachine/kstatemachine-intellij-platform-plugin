@@ -31,7 +31,9 @@ repositories {
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
 dependencies {
-    testImplementation(libs.junit)
+    // PlantUML renderer (MIT-licensed redistribution). Bundled into the plugin
+    // so the Diagram tab can render state charts without external Graphviz.
+    implementation("net.sourceforge.plantuml:plantuml-mit:1.2026.5")
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
@@ -43,7 +45,6 @@ dependencies {
         // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file for plugin from JetBrains Marketplace.
         plugins(providers.gradleProperty("platformPlugins").map { it.split(',') })
 
-        instrumentationTools()
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)
@@ -52,6 +53,10 @@ dependencies {
 
 // Configure IntelliJ Platform Gradle Plugin - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-extension.html
 intellijPlatform {
+    // No custom settings panels in this plugin — skip the sandbox roundtrip that
+    // would otherwise launch a full IDE to harvest searchable options.
+    buildSearchableOptions = false
+
     pluginConfiguration {
         version = providers.gradleProperty("pluginVersion")
 
