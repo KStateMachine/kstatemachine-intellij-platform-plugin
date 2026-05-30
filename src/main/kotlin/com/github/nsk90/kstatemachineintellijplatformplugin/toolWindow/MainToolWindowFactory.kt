@@ -66,12 +66,10 @@ class MainToolWindowFactory : ToolWindowFactory {
         val fileSwitchService = project.service<FileSwitchService>()
         val updateService = project.service<StateMachineUpdateService>()
         toolWindowWorkingScope.launch {
-            fileSwitchService.fileSwitchedFlow.collect { onFileSwitched(it) }
+            fileSwitchService.fileSwitchedFlow.collect { onTabSwitched(it) }
         }
         toolWindowWorkingScope.launch {
-            updateService.updates.collect { file ->
-                if (file == currentFile) onFileSwitched(file)
-            }
+            updateService.updates.collect { onDocumentEdited(it) }
         }
 
         registerCaretListener(toolWindow)
@@ -85,7 +83,7 @@ class MainToolWindowFactory : ToolWindowFactory {
         // event will fire. Parse the active file immediately so the tree
         // populates without requiring the user to click another file and back.
         FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.let { active ->
-            onFileSwitched(active)
+            onInitialOpen(active)
         }
     }
 
@@ -114,31 +112,63 @@ class MainToolWindowFactory : ToolWindowFactory {
         })
     }
 
-    private fun onFileSwitched(file: VirtualFile) {
-        currentFile = file
+    // Tab switch (FileSwitchService): only commit to a new file if it actually
+    // contains machines. Otherwise keep the previous view so the user can browse
+    // helper files while keeping the state-machine structure on screen.
+    private fun onTabSwitched(file: VirtualFile) {
         runTaskWithProgress(project) {
-            try {
-                // null result == file isn't a Kotlin file (or doesn't resolve to PSI).
-                val machines: List<StateMachine>? = runReadActionBlocking {
-                    val psiFile = PsiManager.getInstance(project).findFile(file) as? KtFile
-                    psiFile?.let { PsiElementsParser(Output { thisLogger().info(it) }).parse(it) }
-                }
-                ApplicationManager.getApplication().invokeLater {
-                    if (machines == null) {
-                        treePanel.clear()
-                        diagramPanel.showPlaceholder("Not a Kotlin file")
-                    } else {
-                        treePanel.setMachines(machines)
-                        diagramPanel.render(machines)
-                    }
-                }
-            } catch (e: Exception) {
-                thisLogger().warn("Failed to parse ${file.path}", e)
+            val machines = parseFileOrNull(file) ?: return@runTaskWithProgress
+            if (machines.isEmpty()) return@runTaskWithProgress
+            currentFile = file
+            applyToUi(machines)
+        }
+    }
+
+    // Live document edit (StateMachineUpdateService): only ever applies to the
+    // currently-displayed file, and always commits — even to an empty list,
+    // because the user might have just deleted their createStateMachine call
+    // and needs to see that reflected.
+    private fun onDocumentEdited(file: VirtualFile) {
+        if (file != currentFile) return
+        runTaskWithProgress(project) {
+            val machines = parseFileOrNull(file) ?: emptyList()
+            applyToUi(machines)
+        }
+    }
+
+    // First file the tool window sees when it opens. Same rule as a tab switch
+    // for non-empty results, but we explicitly render an empty-state placeholder
+    // when there's nothing to show so the user isn't staring at a blank panel.
+    private fun onInitialOpen(file: VirtualFile) {
+        runTaskWithProgress(project) {
+            val machines = parseFileOrNull(file)
+            if (machines.isNullOrEmpty()) {
                 ApplicationManager.getApplication().invokeLater {
                     treePanel.clear()
-                    diagramPanel.showPlaceholder("Error: ${e.message}")
+                    diagramPanel.showPlaceholder("Open a Kotlin file with a state machine to start")
                 }
+                return@runTaskWithProgress
             }
+            currentFile = file
+            applyToUi(machines)
+        }
+    }
+
+    /** Returns null only when [file] is not a Kotlin file or parsing throws. */
+    private fun parseFileOrNull(file: VirtualFile): List<StateMachine>? = try {
+        runReadActionBlocking {
+            val psiFile = PsiManager.getInstance(project).findFile(file) as? KtFile
+            psiFile?.let { PsiElementsParser(Output { thisLogger().info(it) }).parse(it) }
+        }
+    } catch (e: Exception) {
+        thisLogger().warn("Failed to parse ${file.path}", e)
+        null
+    }
+
+    private fun applyToUi(machines: List<StateMachine>) {
+        ApplicationManager.getApplication().invokeLater {
+            treePanel.setMachines(machines)
+            diagramPanel.render(machines)
         }
     }
 }

@@ -167,7 +167,7 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
 }
 
 private fun displayName(rawName: String): String =
-    if (rawName.isBlank() || rawName == "null" || rawName == "<unnamed>") "(unnamed)" else rawName
+    if (rawName.isBlank() || rawName == "null" || rawName == "<unnamed>") "State (unnamed)" else rawName
 
 private fun Transition.transitionLabel(): String = when {
     name.isNotBlank() && name != "null" && name != "<unnamed>" -> name
