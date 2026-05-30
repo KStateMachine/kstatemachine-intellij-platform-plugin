@@ -25,17 +25,10 @@ class PsiElementsParser(private val output: Output) {
     fun parse(psiFile: KtFile): List<StateMachine> {
         val pointerManager = SmartPointerManager.getInstance(psiFile.project)
         val machines = mutableListOf<StateMachine>()
-        psiFile.findMachineCalls().forEach { machineCall ->
-            val name = findArgumentValueWithDefaults(machineCall, NAME_ARGUMENT) ?: "<unnamed>"
-            val (states, transitions) = parseLambdaChildren(machineCall.dslLambda(), pointerManager)
-            val machine = StateMachine(
-                name = name,
-                states = states,
-                transitions = transitions,
-                pointer = pointerManager.createSmartPsiElementPointer(machineCall),
-            )
+        psiFile.findTopLevelMachineCalls().forEach { machineCall ->
+            val machine = parseMachine(machineCall, pointerManager)
             machines += machine
-            output.write("Parsed state machine: $name (${states.size} substates, ${transitions.size} transitions)")
+            output.write("Parsed state machine: ${machine.name} (${machine.states.size} substates, ${machine.transitions.size} transitions)")
         }
         return machines
     }
@@ -60,7 +53,13 @@ class PsiElementsParser(private val output: Output) {
                         eventType = call.typeArguments.firstOrNull()?.text,
                     )
                 }
-                KStateMachineCalls.Kind.MACHINE, null -> {
+                KStateMachineCalls.Kind.MACHINE -> {
+                    // Nested machine — render it as a substate. StateMachine
+                    // extends State so it slots into the children list directly,
+                    // and the diagram generator wraps it in its own named block.
+                    states += parseMachine(call, pointerManager)
+                }
+                null -> {
                     // Unrecognized callee with a lambda is most likely the
                     // `state.invoke { … }` operator-call pattern that the DSL
                     // uses to configure a state held in a variable
@@ -107,6 +106,20 @@ class PsiElementsParser(private val output: Output) {
             kind = call.addStateKindFromCallee(),
         )
     }
+
+    // createStateMachine / createStateMachineBlocking / createStdLibStateMachine —
+    // builds a StateMachine (a State subclass) from the call's lambda. Used for
+    // top-level machines AND nested machines (substates of another machine).
+    private fun parseMachine(call: KtCallExpression, pointerManager: SmartPointerManager): StateMachine {
+        val name = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
+        val (states, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
+        return StateMachine(
+            name = name,
+            states = states,
+            transitions = transitions,
+            pointer = pointerManager.createSmartPsiElementPointer(call),
+        )
+    }
 }
 
 private fun KtCallExpression.addStateKindFromCallee(): StateKind = when (calleeExpression?.text) {
@@ -115,9 +128,28 @@ private fun KtCallExpression.addStateKindFromCallee(): StateKind = when (calleeE
     else -> StateKind.STATE
 }
 
-private fun PsiElement.findMachineCalls(): List<KtCallExpression> =
+// Returns only machine calls that are NOT nested inside another machine's
+// lambda — nested ones get picked up as substates by parseMachine when we
+// recurse into their parent. Returning them as top-level too would
+// double-count them in the result.
+private fun PsiElement.findTopLevelMachineCalls(): List<KtCallExpression> =
     PsiTreeUtil.findChildrenOfType(this, KtCallExpression::class.java)
         .filter { KStateMachineCalls.matchKind(it) == KStateMachineCalls.Kind.MACHINE }
+        .filter { !it.isNestedInsideMachineCall() }
+
+private fun KtCallExpression.isNestedInsideMachineCall(): Boolean {
+    var ancestor: PsiElement? = parent
+    while (ancestor != null) {
+        if (ancestor is KtCallExpression
+            && ancestor !== this
+            && KStateMachineCalls.matchKind(ancestor) == KStateMachineCalls.Kind.MACHINE
+        ) {
+            return true
+        }
+        ancestor = ancestor.parent
+    }
+    return false
+}
 
 private fun KtCallExpression.kindFromCallee(): StateKind = when (calleeExpression?.text) {
     "initialState" -> StateKind.INITIAL
