@@ -3,6 +3,7 @@
 # KStateMachine Visual
 
 **The IntelliJ Platform plugin for the [KStateMachine](https://github.com/KStateMachine/kstatemachine) Kotlin library**
+
 **Visualize and navigate state machines straight from your source — no runtime needed**
 
 ---
