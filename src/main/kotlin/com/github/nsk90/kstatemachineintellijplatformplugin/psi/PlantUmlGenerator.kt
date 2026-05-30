@@ -21,6 +21,11 @@ object PlantUmlGenerator {
     fun render(machine: StateMachine): String = buildString {
         appendLine("@startuml")
         appendLine("!pragma layout smetana")
+        // Force vertical layout — the plugin's tool window is taller than it
+        // is wide, so left-to-right diagrams overflow horizontally and require
+        // constant scrolling. `top to bottom direction` is the official
+        // PlantUML directive for this.
+        appendLine("top to bottom direction")
         appendLine("hide empty description")
         appendLine()
 

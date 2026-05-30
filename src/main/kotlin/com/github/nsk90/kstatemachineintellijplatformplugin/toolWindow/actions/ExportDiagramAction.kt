@@ -28,9 +28,7 @@ class ExportDiagramAction : AnAction(
 
         val descriptor = FileSaverDescriptor(
             "Export State Diagram",
-            "Choose where to save the diagram (.png or .svg)",
-            "png",
-            "svg",
+            "Choose where to save the diagram (.png or .svg) — file format is taken from the extension you type",
         )
         val wrapper = FileChooserFactory.getInstance()
             .createSaveFileDialog(descriptor, project)

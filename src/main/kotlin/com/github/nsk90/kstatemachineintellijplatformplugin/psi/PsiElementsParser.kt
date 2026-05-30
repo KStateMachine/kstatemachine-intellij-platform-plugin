@@ -7,19 +7,11 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
 import com.intellij.psi.PsiElement
 import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.util.PsiTreeUtil
-import org.jetbrains.kotlin.constant.ConstantValue
-import org.jetbrains.kotlin.descriptors.ValueParameterDescriptor
-import org.jetbrains.kotlin.idea.caches.resolve.analyze
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtBinaryExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtLambdaExpression
-import org.jetbrains.kotlin.psi.KtParameter
-import org.jetbrains.kotlin.resolve.BindingContext
-import org.jetbrains.kotlin.resolve.calls.util.getResolvedCall
-import org.jetbrains.kotlin.resolve.constants.evaluate.ConstantExpressionEvaluator
-import org.jetbrains.kotlin.resolve.source.getPsi
 
 private const val NAME_ARGUMENT = "name"
 private const val STATE_ARGUMENT = "state"
@@ -58,15 +50,7 @@ class PsiElementsParser(private val output: Output) {
         lambda.directCallExpressions().forEach { call ->
             when (KStateMachineCalls.matchKind(call)) {
                 KStateMachineCalls.Kind.STATE -> states += parseState(call, pointerManager)
-                KStateMachineCalls.Kind.ADD_STATE -> {
-                    val stateName = findArgumentValueWithDefaults(call, STATE_ARGUMENT) ?: "<unknown>"
-                    states += State(
-                        name = stateName,
-                        states = emptyList(),
-                        transitions = emptyList(),
-                        pointer = pointerManager.createSmartPsiElementPointer(call),
-                    )
-                }
+                KStateMachineCalls.Kind.ADD_STATE -> states += parseAddState(call, pointerManager)
                 KStateMachineCalls.Kind.TRANSITION -> {
                     val transitionName = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
                     transitions += Transition(
@@ -77,8 +61,18 @@ class PsiElementsParser(private val output: Output) {
                     )
                 }
                 KStateMachineCalls.Kind.MACHINE, null -> {
-                    // Nested machine declarations would be promoted to top-level on next pass.
-                    // No-op here so we don't double-count.
+                    // Unrecognized callee with a lambda is most likely the
+                    // `state.invoke { … }` operator-call pattern that the DSL
+                    // uses to configure a state held in a variable
+                    // (e.g. `airAttacking { transition<E>(…) }`). Recurse into
+                    // its lambda and attribute any found content to the
+                    // current scope — without binding-context resolution we
+                    // can't link the variable back to its `addState(…)` node,
+                    // but at least the transitions appear somewhere visible.
+                    val (nestedStates, nestedTransitions) =
+                        parseLambdaChildren(call.dslLambda(), pointerManager)
+                    states += nestedStates
+                    transitions += nestedTransitions
                 }
             }
         }
@@ -96,6 +90,29 @@ class PsiElementsParser(private val output: Output) {
             kind = call.kindFromCallee(),
         )
     }
+
+    // addState / addInitialState / addFinalState take the state instance as the
+    // first positional argument and accept a configuration lambda that holds
+    // nested transitions and substates. We must recurse into the lambda — the
+    // previous implementation skipped it and silently dropped every transition
+    // declared this way.
+    private fun parseAddState(call: KtCallExpression, pointerManager: SmartPointerManager): State {
+        val name = findArgumentValueWithDefaults(call, STATE_ARGUMENT) ?: "<unknown>"
+        val (substates, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
+        return State(
+            name = name,
+            states = substates,
+            transitions = transitions,
+            pointer = pointerManager.createSmartPsiElementPointer(call),
+            kind = call.addStateKindFromCallee(),
+        )
+    }
+}
+
+private fun KtCallExpression.addStateKindFromCallee(): StateKind = when (calleeExpression?.text) {
+    "addInitialState" -> StateKind.INITIAL
+    "addFinalState" -> StateKind.FINAL
+    else -> StateKind.STATE
 }
 
 private fun PsiElement.findMachineCalls(): List<KtCallExpression> =
@@ -118,10 +135,20 @@ private fun KtCallExpression.kindFromCallee(): StateKind = when (calleeExpressio
     else -> StateKind.STATE
 }
 
-// Best-effort: find the right-hand side of `targetState = ...` inside the
-// transition's lambda body. Returns the raw text of the RHS (e.g. "redState"
-// or "{ yellowState }" for transitionOn). null if not set.
+// Best-effort: find the right-hand side of `targetState = …`. KStateMachine
+// supports two forms:
+//   transition<E>("name", targetState = Jumping)      // value argument
+//   transition<E>("name") { targetState = X }          // lambda body assignment
+// Returns the raw text of the target (e.g. "Jumping" or "{ X }" for the
+// transitionOn lambda form). null if not set.
 private fun KtCallExpression.findTargetStateName(): String? {
+    // (1) Named value argument: `transition<E>(targetState = Foo)`
+    valueArgumentList?.arguments
+        ?.firstOrNull { it.getArgumentName()?.asName?.asString() == TARGET_STATE_PROPERTY }
+        ?.getArgumentExpression()?.text
+        ?.let { return it }
+
+    // (2) Assignment inside the lambda body: `transition<E> { targetState = Foo }`
     val body = dslLambda()?.bodyExpression ?: return null
     var found: String? = null
     fun walk(element: PsiElement) {
@@ -161,34 +188,35 @@ private fun KtLambdaExpression.directCallExpressions(): List<KtCallExpression> {
     return result
 }
 
+/**
+ * PSI-only argument extractor. Returns the raw text of [argumentName]'s value
+ * in [callExpression], or null if the argument isn't explicitly passed.
+ *
+ * Matches by named argument first (e.g. `state(name = "red")`). If [argumentName]
+ * is "name" we additionally accept the first positional argument — the KStateMachine
+ * DSL convention is `state("red")` without naming the parameter explicitly.
+ *
+ * We don't try to resolve default values here. Going PSI-only intentionally
+ * avoids the K1 analysis API (deprecated in modern Kotlin plugin builds) and is
+ * good enough because every KStateMachine state/transition factory either gives
+ * the value inline or leaves it to default to `null`, which our renderer
+ * displays as "(unnamed)".
+ */
 private fun findArgumentValueWithDefaults(
     callExpression: KtCallExpression,
     argumentName: String
 ): String? {
-    val context = callExpression.analyze()
-    val resolvedCall = callExpression.getResolvedCall(context) ?: return null
-    val parameterDescriptors = resolvedCall.resultingDescriptor.valueParameters
+    val args = callExpression.valueArgumentList?.arguments.orEmpty()
+    args.firstOrNull { it.getArgumentName()?.asName?.asString() == argumentName }
+        ?.getArgumentExpression()?.text
+        ?.let { return it }
 
-    for (parameter in parameterDescriptors) {
-        if (parameter.name.asString() != argumentName) continue
-
-        val resolvedArgument = resolvedCall.valueArguments[parameter]
-        if (resolvedArgument != null) {
-            val argumentExpression = resolvedArgument.arguments.firstOrNull()?.getArgumentExpression()
-            return argumentExpression?.text ?: "null"
-        }
-        return getDefaultValue(parameter, context) ?: "null"
-    }
+    // Fallback to the first positional arg. KStateMachine DSL convention puts
+    // the "primary" parameter first: state("red") / addState(myState) /
+    // transition<E>("name") — so this lookup is right for all our call sites.
+    args.firstOrNull { it.getArgumentName() == null }
+        ?.getArgumentExpression()?.text
+        ?.let { return it }
 
     return null
-}
-
-private fun getDefaultValue(parameter: ValueParameterDescriptor, context: BindingContext): String? {
-    if (!parameter.declaresDefaultValue()) return null
-
-    val psiElement = parameter.source.getPsi() as? KtParameter ?: return null
-    val defaultValueExpression = psiElement.defaultValue ?: return null
-
-    val constantValue = ConstantExpressionEvaluator.getConstant(defaultValueExpression, context)
-    return (constantValue as? ConstantValue<*>)?.value?.toString() ?: defaultValueExpression.text
 }

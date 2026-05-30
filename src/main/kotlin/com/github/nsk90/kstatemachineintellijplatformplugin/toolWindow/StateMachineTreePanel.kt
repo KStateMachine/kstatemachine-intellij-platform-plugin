@@ -195,7 +195,7 @@ private fun StateKind.icon() = when (this) {
     StateKind.CHOICE, StateKind.CHOICE_DATA -> AllIcons.Vcs.Branch
     StateKind.INITIAL_CHOICE, StateKind.INITIAL_CHOICE_DATA -> AllIcons.Vcs.Branch
     StateKind.HISTORY -> AllIcons.Vcs.History
-    StateKind.STATE, StateKind.DATA -> AllIcons.Nodes.Module
+    StateKind.STATE, StateKind.DATA -> AllIcons.Nodes.ModelClass
 }
 
 private fun StateKind.label(): String? = when (this) {

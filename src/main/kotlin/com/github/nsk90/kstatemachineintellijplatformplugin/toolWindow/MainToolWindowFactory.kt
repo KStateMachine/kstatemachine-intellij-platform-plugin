@@ -1,5 +1,6 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow
 
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
 import com.github.nsk90.kstatemachineintellijplatformplugin.psi.Output
 import com.github.nsk90.kstatemachineintellijplatformplugin.psi.PsiElementsParser
 import com.github.nsk90.kstatemachineintellijplatformplugin.services.FileSwitchService
@@ -8,7 +9,7 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.services.StateMachin
 import com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.actions.CopyPlantUmlAction
 import com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.actions.ExportDiagramAction
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.event.CaretEvent
@@ -116,27 +117,26 @@ class MainToolWindowFactory : ToolWindowFactory {
     private fun onFileSwitched(file: VirtualFile) {
         currentFile = file
         runTaskWithProgress(project) {
-            runReadAction {
-                try {
-                    val psiFile = PsiManager.getInstance(project).findFile(file)
-                    if (psiFile !is KtFile) {
-                        ApplicationManager.getApplication().invokeLater {
-                            treePanel.clear()
-                            diagramPanel.showPlaceholder("Not a Kotlin file")
-                        }
-                        return@runReadAction
-                    }
-                    val machines = PsiElementsParser(Output { thisLogger().info(it) }).parse(psiFile)
-                    ApplicationManager.getApplication().invokeLater {
+            try {
+                // null result == file isn't a Kotlin file (or doesn't resolve to PSI).
+                val machines: List<StateMachine>? = runReadActionBlocking {
+                    val psiFile = PsiManager.getInstance(project).findFile(file) as? KtFile
+                    psiFile?.let { PsiElementsParser(Output { thisLogger().info(it) }).parse(it) }
+                }
+                ApplicationManager.getApplication().invokeLater {
+                    if (machines == null) {
+                        treePanel.clear()
+                        diagramPanel.showPlaceholder("Not a Kotlin file")
+                    } else {
                         treePanel.setMachines(machines)
                         diagramPanel.render(machines)
                     }
-                } catch (e: Exception) {
-                    thisLogger().warn("Failed to parse ${file.path}", e)
-                    ApplicationManager.getApplication().invokeLater {
-                        treePanel.clear()
-                        diagramPanel.showPlaceholder("Error: ${e.message}")
-                    }
+                }
+            } catch (e: Exception) {
+                thisLogger().warn("Failed to parse ${file.path}", e)
+                ApplicationManager.getApplication().invokeLater {
+                    treePanel.clear()
+                    diagramPanel.showPlaceholder("Error: ${e.message}")
                 }
             }
         }
