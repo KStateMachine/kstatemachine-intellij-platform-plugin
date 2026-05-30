@@ -32,15 +32,12 @@ object PlantUmlGenerator {
         val ids = mutableMapOf<State, String>()
         assignIds(machine, ids, taken = mutableSetOf("start", "end"))
 
-        // Emit declarations (nested states)
-        machine.states.forEach { appendStateDecl(it, ids, indent = 0) }
+        // The machine itself is a State — render it as a wrapping `state Name { … }`
+        // block. Children are emitted recursively, including any nested machines
+        // (which get the same wrap-in-named-block treatment).
+        appendStateDecl(machine, ids, indent = 0)
 
-        // Initial-state arrow: connect [*] to any child marked as initial.
-        machine.states.firstOrNull { it.kind.isInitial() }?.let {
-            appendLine("[*] --> ${ids[it]}")
-        }
-
-        // Transitions (collected from every level so arrows cross nesting boundaries)
+        // Transitions are collected from every level so arrows cross nesting boundaries.
         forEachStateWithAncestors(machine, ancestors = emptyList()) { source, ancestors ->
             source.transitions.forEach { t ->
                 appendTransition(source, t, ancestors, ids)

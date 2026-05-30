@@ -42,6 +42,7 @@ class MainToolWindowFactory : ToolWindowFactory {
     private lateinit var project: Project
     private lateinit var treePanel: StateMachineTreePanel
     private lateinit var diagramPanel: StateMachineDiagramPanel
+    private lateinit var playgroundPanel: PlantUmlPlaygroundPanel
     private lateinit var toolWindowWorkingScope: CoroutineScope
 
     @Volatile
@@ -51,11 +52,13 @@ class MainToolWindowFactory : ToolWindowFactory {
         this.project = project
         treePanel = StateMachineTreePanel(project)
         diagramPanel = StateMachineDiagramPanel()
+        playgroundPanel = PlantUmlPlaygroundPanel()
         project.service<StateMachineViewService>().bind(treePanel, diagramPanel)
 
         val tabs = JBTabbedPane().apply {
             addTab("Structure", treePanel.component)
             addTab("Diagram", diagramPanel.component)
+            addTab("Playground", playgroundPanel.component)
         }
 
         val content = ContentFactory.getInstance().createContent(tabs, null, false)
