@@ -10,9 +10,14 @@ import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtBinaryExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.KtStringTemplateExpression
 
 private const val NAME_ARGUMENT = "name"
@@ -325,17 +330,19 @@ private fun findArgumentValueWithDefaults(
 
     // (1) Explicit named argument.
     args.firstOrNull { it.getArgumentName()?.asName?.asString() == argumentName }
-        ?.getArgumentExpression()?.text
+        ?.getArgumentExpression()
+        ?.resolveAsLiteral()
         ?.let { return it }
 
-    // (2) For machine / state / transition names, the user almost always
-    // passes a string literal. Picking the first string-literal positional
-    // argument lets `createStateMachineBlocking(scope, "Hero", …)` resolve
-    // correctly even though `scope` is the first positional slot.
+    // (2) For machine / state / transition names, prefer the first positional
+    // argument that resolves to a string literal — either directly or via a
+    // same-file constant. This lets `createStateMachineBlocking(scope, "Hero", …)`
+    // pick "Hero" (skipping `scope`), and also resolves
+    // `state(RED_STATE_NAME)` where RED_STATE_NAME is a same-file constant.
     if (argumentName == NAME_ARGUMENT) {
-        args.firstOrNull {
-            it.getArgumentName() == null && it.getArgumentExpression() is KtStringTemplateExpression
-        }?.getArgumentExpression()?.text?.let { return it }
+        args.firstOrNull { arg ->
+            arg.getArgumentName() == null && arg.getArgumentExpression()?.resolvesToStringLiteral() == true
+        }?.getArgumentExpression()?.resolveAsLiteral()?.let { return it }
     }
 
     // (3) addState(MyState()) → "MyState" (drop the constructor parens).
@@ -346,9 +353,10 @@ private fun findArgumentValueWithDefaults(
             ?.let { return it }
     }
 
-    // (4) Generic positional fallback.
+    // (4) Generic positional fallback — resolve constants when possible.
     args.firstOrNull { it.getArgumentName() == null }
-        ?.getArgumentExpression()?.text
+        ?.getArgumentExpression()
+        ?.resolveAsLiteral()
         ?.let { return it }
 
     return null
@@ -360,4 +368,64 @@ private fun findArgumentValueWithDefaults(
 private fun KtExpression.simplifiedStateName(): String = when (this) {
     is KtCallExpression -> calleeExpression?.text ?: text
     else -> text
+}
+
+/**
+ * Returns the expression's text, resolving same-file string constants when
+ * possible. Handles:
+ *   - String literals: returned as-is (with surrounding quotes preserved).
+ *   - Top-level constants: `const val RED = "red"` → `state(RED)` resolves to "\"red\"".
+ *   - Object members: `object Names { const val RED = "red" }` → `state(Names.RED)`.
+ *   - Class companions: `class Names { companion object { const val RED = "red" } }`
+ *     → `state(Names.RED)`.
+ *
+ * Falls back to raw expression text when no constant resolution applies. The
+ * caller (renderer) strips surrounding quotes via `String.unquote()`, so the
+ * final tree label shows `red` either way.
+ */
+private fun KtExpression.resolveAsLiteral(): String {
+    if (this is KtStringTemplateExpression) return text
+    val file = containingKtFile
+    when (this) {
+        is KtNameReferenceExpression ->
+            file.findTopLevelStringConstant(text)?.let { return it }
+        is KtDotQualifiedExpression -> {
+            val receiver = receiverExpression as? KtNameReferenceExpression
+            val selector = selectorExpression as? KtNameReferenceExpression
+            if (receiver != null && selector != null) {
+                file.findScopedStringConstant(receiver.text, selector.text)?.let { return it }
+            }
+        }
+    }
+    return text
+}
+
+/** True if [resolveAsLiteral] would yield a string-literal value (directly or via constant). */
+private fun KtExpression.resolvesToStringLiteral(): Boolean {
+    if (this is KtStringTemplateExpression) return true
+    val file = containingKtFile
+    return when (this) {
+        is KtNameReferenceExpression -> file.findTopLevelStringConstant(text) != null
+        is KtDotQualifiedExpression -> {
+            val receiver = receiverExpression as? KtNameReferenceExpression ?: return false
+            val selector = selectorExpression as? KtNameReferenceExpression ?: return false
+            file.findScopedStringConstant(receiver.text, selector.text) != null
+        }
+        else -> false
+    }
+}
+
+private fun KtFile.findTopLevelStringConstant(name: String): String? {
+    val prop = declarations.filterIsInstance<KtProperty>().firstOrNull { it.name == name } ?: return null
+    return (prop.initializer as? KtStringTemplateExpression)?.text
+}
+
+private fun KtFile.findScopedStringConstant(scope: String, member: String): String? {
+    val container: org.jetbrains.kotlin.psi.KtClassOrObject =
+        declarations.filterIsInstance<KtObjectDeclaration>().firstOrNull { it.name == scope }
+            ?: declarations.filterIsInstance<KtClass>().firstOrNull { it.name == scope }
+                ?.companionObjects?.firstOrNull()
+            ?: return null
+    val prop = container.declarations.filterIsInstance<KtProperty>().firstOrNull { it.name == member } ?: return null
+    return (prop.initializer as? KtStringTemplateExpression)?.text
 }

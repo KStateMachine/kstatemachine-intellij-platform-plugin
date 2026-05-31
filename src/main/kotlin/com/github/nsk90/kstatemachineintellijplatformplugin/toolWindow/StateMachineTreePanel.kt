@@ -140,6 +140,11 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                     append("StateMachine ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                     append(resolved)
                 }
+                // Top-level machines live at tree depth 1 (direct children of the
+                // invisible root). Anything deeper is a *nested* machine — flag it
+                // explicitly so it stands out from regular state nodes that share
+                // the same tree level.
+                if (node.level > 1) append("  (machine)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 val counts = data.subtreeCounts()
                 append("  (${counts.first} states, ${counts.second} transitions)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
