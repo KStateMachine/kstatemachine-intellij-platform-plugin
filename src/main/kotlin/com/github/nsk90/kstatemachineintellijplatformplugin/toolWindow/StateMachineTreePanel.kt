@@ -325,7 +325,7 @@ private fun StateKind.icon() = when (this) {
     StateKind.INITIAL_FINAL, StateKind.INITIAL_FINAL_DATA, StateKind.INITIAL_FINAL_MUTABLE_DATA -> AllIcons.Actions.Suspend
     StateKind.CHOICE, StateKind.CHOICE_DATA -> AllIcons.Vcs.Branch
     StateKind.INITIAL_CHOICE, StateKind.INITIAL_CHOICE_DATA -> AllIcons.Vcs.Branch
-    StateKind.HISTORY -> AllIcons.Vcs.History
+    StateKind.HISTORY, StateKind.HISTORY_DEEP -> AllIcons.Vcs.History
     StateKind.STATE, StateKind.DATA, StateKind.MUTABLE_DATA -> AllIcons.Nodes.ModelClass
 }
 
@@ -346,5 +346,6 @@ private fun StateKind.label(): String? = when (this) {
     StateKind.INITIAL_CHOICE -> "(initial choice)"
     StateKind.CHOICE_DATA -> "(choice data)"
     StateKind.INITIAL_CHOICE_DATA -> "(initial choice data)"
-    StateKind.HISTORY -> "(history)"
+    StateKind.HISTORY -> "(history, shallow)"
+    StateKind.HISTORY_DEEP -> "(history, deep)"
 }

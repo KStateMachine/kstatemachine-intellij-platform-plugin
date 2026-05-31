@@ -23,6 +23,7 @@ import org.jetbrains.kotlin.psi.KtStringTemplateExpression
 private const val NAME_ARGUMENT = "name"
 private const val STATE_ARGUMENT = "state"
 private const val CHILD_MODE_ARGUMENT = "childMode"
+private const val HISTORY_TYPE_ARGUMENT = "historyType"
 private const val TARGET_STATE_PROPERTY = "targetState"
 private const val GUARD_PROPERTY = "guard"
 
@@ -106,7 +107,11 @@ class PsiElementsParser(private val output: Output) {
     private fun parseState(call: KtCallExpression, pointerManager: SmartPointerManager): State {
         val name = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
         val (substates, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
-        val kind = call.kindFromCallee()
+        val baseKind = call.kindFromCallee()
+        // historyState defaults to SHALLOW; promote to HISTORY_DEEP when the
+        // call explicitly passes `historyType = HistoryType.DEEP` (named or
+        // positional).
+        val kind = if (baseKind == StateKind.HISTORY && call.isDeepHistory()) StateKind.HISTORY_DEEP else baseKind
         return State(
             name = name,
             states = substates,
@@ -260,6 +265,21 @@ private fun KtCallExpression.findLambdaAssignment(propertyName: String): String?
     }
     walk(body)
     return found
+}
+
+/**
+ * True if the call passes `HistoryType.DEEP` for the `historyType` parameter.
+ * Accepts either a named arg (`historyState(historyType = HistoryType.DEEP)`)
+ * or a positional `HistoryType.DEEP` / bare `DEEP` enum constant.
+ */
+private fun KtCallExpression.isDeepHistory(): Boolean {
+    val args = valueArgumentList?.arguments.orEmpty()
+    return args.any { arg ->
+        val argName = arg.getArgumentName()?.asName?.asString()
+        if (argName != null && argName != HISTORY_TYPE_ARGUMENT) return@any false
+        val text = arg.getArgumentExpression()?.text?.trim() ?: return@any false
+        text == "DEEP" || text.endsWith(".DEEP")
+    }
 }
 
 /**

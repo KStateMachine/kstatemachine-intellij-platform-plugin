@@ -21,6 +21,7 @@ enum class StateKind {
     CHOICE_DATA,
     INITIAL_CHOICE_DATA,
     HISTORY,
+    HISTORY_DEEP,
 }
 
 open class State(
