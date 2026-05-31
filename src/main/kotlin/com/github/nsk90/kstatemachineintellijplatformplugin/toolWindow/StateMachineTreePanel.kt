@@ -13,7 +13,11 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
 import org.jetbrains.kotlin.psi.KtCallExpression
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.JComponent
+import javax.swing.JMenuItem
+import javax.swing.JPopupMenu
 import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
@@ -44,6 +48,74 @@ class StateMachineTreePanel(private val project: Project) {
             val pointer = node.pointer() ?: return@addTreeSelectionListener
             navigateToPointer(pointer)
         }
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) {
+                if (e.isPopupTrigger) maybeShowTransitionPopup(e)
+            }
+            override fun mouseReleased(e: MouseEvent) {
+                if (e.isPopupTrigger) maybeShowTransitionPopup(e)
+            }
+        })
+    }
+
+    /**
+     * Right-click handler for transition rows. Shows a popup with
+     * "Navigate to target state" when the transition's `targetState` can be
+     * matched against a single state node in the same tree. Lambda-form
+     * targets (transitionOn's `{ … }`) and unresolved targets get no popup —
+     * there's nothing actionable to offer.
+     */
+    private fun maybeShowTransitionPopup(e: MouseEvent) {
+        val path = tree.getPathForLocation(e.x, e.y) ?: return
+        val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
+        val transition = node.userObject as? Transition ?: return
+        val targetNode = findTargetStateNode(transition) ?: return
+
+        // Select the right-clicked row first so the popup visibly belongs to it.
+        // Suppress the selection listener so we don't open the *transition's*
+        // source location — the menu click will jump to the *target* instead.
+        suppressSelectionEvents = true
+        try {
+            tree.selectionPath = path
+        } finally {
+            suppressSelectionEvents = false
+        }
+
+        JPopupMenu().apply {
+            add(JMenuItem("Navigate to target state").apply {
+                addActionListener { selectNode(targetNode) }
+            })
+        }.show(tree, e.x, e.y)
+    }
+
+    private fun findTargetStateNode(transition: Transition): DefaultMutableTreeNode? {
+        val raw = transition.targetStateName?.trim() ?: return null
+        // Lambda target — `transitionOn { targetState = { … } }`. Not a simple name.
+        if (raw.startsWith("{")) return null
+        val target = raw.removeSurrounding("\"").trim()
+        if (target.isEmpty()) return null
+        return findStateNodeByName(rootNode, target)
+    }
+
+    private fun findStateNodeByName(node: DefaultMutableTreeNode, name: String): DefaultMutableTreeNode? {
+        val state = node.userObject as? State
+        if (state != null && state.name.unquote().equals(name, ignoreCase = true)) {
+            return node
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChildAt(i) as DefaultMutableTreeNode
+            findStateNodeByName(child, name)?.let { return it }
+        }
+        return null
+    }
+
+    private fun selectNode(target: DefaultMutableTreeNode) {
+        val path = TreePath(target.path)
+        tree.expandPath(path.parentPath ?: path)
+        tree.selectionPath = path
+        tree.scrollPathToVisible(path)
+        // Selection event will fire normally, jumping the editor to the target
+        // state's declaration — which is exactly the "navigate" the user asked for.
     }
 
     fun setMachines(machines: List<StateMachine>) {
