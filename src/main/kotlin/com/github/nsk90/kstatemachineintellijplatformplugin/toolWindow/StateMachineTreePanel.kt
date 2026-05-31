@@ -90,9 +90,25 @@ class StateMachineTreePanel(private val project: Project) {
 
     private fun findTargetStateNode(transition: Transition): DefaultMutableTreeNode? {
         val raw = transition.targetStateName?.trim() ?: return null
-        // Lambda target — `transitionOn { targetState = { … } }`. Not a simple name.
-        if (raw.startsWith("{")) return null
-        val target = raw.removeSurrounding("\"").trim()
+        val target = when {
+            // transitionOn lambda — `targetState = { someState }`. If the lambda
+            // body is a single identifier (optionally dotted, e.g. `Names.RED`),
+            // we can resolve it just like a plain reference. Anything with
+            // operators / branches / calls (`{ if (…) A else B }`) stays
+            // unresolved — there's no single deterministic target.
+            raw.startsWith("{") && raw.endsWith("}") -> {
+                val body = raw.removeSurrounding("{", "}").trim()
+                    .removePrefix("this.").trim()
+                if (body.isNotEmpty() && body.all { it.isLetterOrDigit() || it == '_' || it == '.' }) {
+                    // Use the last segment for dotted refs like `Names.RED` so
+                    // the tree match works against state nodes named `RED`.
+                    body.substringAfterLast('.')
+                } else {
+                    return null
+                }
+            }
+            else -> raw.removeSurrounding("\"").trim()
+        }
         if (target.isEmpty()) return null
         return findStateNodeByName(rootNode, target)
     }
