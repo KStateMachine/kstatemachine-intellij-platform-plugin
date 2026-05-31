@@ -4,8 +4,9 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
 import com.github.nsk90.kstatemachineintellijplatformplugin.psi.PlantUmlGenerator
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
-import com.intellij.ui.JBSplitter
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.IdeBorderFactory
+import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
@@ -14,6 +15,7 @@ import net.sourceforge.plantuml.FileFormatOption
 import net.sourceforge.plantuml.SourceStringReader
 import java.awt.BorderLayout
 import java.awt.Font
+import java.awt.event.ActionListener
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -45,7 +47,15 @@ class StateMachineDiagramPanel {
         setHonorComponentsMinimumSize(true)
     }
 
-    val component: JComponent get() = splitter
+    private val machineSelector = ComboBox<MachineEntry>()
+    private val selectorListener = ActionListener { renderSelected() }
+
+    private val rootPanel = JPanel(BorderLayout()).apply {
+        add(machineSelector, BorderLayout.NORTH)
+        add(splitter, BorderLayout.CENTER)
+    }
+
+    val component: JComponent get() = rootPanel
 
     /** Last successfully generated PlantUML source. Used by Copy / Export actions. */
     @Volatile
@@ -59,7 +69,16 @@ class StateMachineDiagramPanel {
 
     private var lastRenderedSource: String? = null
 
+    @Volatile
+    private var currentMachines: List<StateMachine> = emptyList()
+
+    init {
+        machineSelector.addActionListener(selectorListener)
+    }
+
     fun showPlaceholder(message: String) {
+        currentMachines = emptyList()
+        rebuildSelector(emptyList())
         currentPlantUml = null
         currentImage = null
         lastRenderedSource = null
@@ -68,20 +87,54 @@ class StateMachineDiagramPanel {
     }
 
     fun render(machines: List<StateMachine>) {
+        currentMachines = machines
         if (machines.isEmpty()) {
             showPlaceholder("No state machines in this file")
             return
         }
-        // Render only the first machine for now. Multi-machine files get a hint.
-        val machine = machines.first()
+        rebuildSelector(machines)
+        renderSelected()
+    }
+
+    /**
+     * Repopulates the machine dropdown. Keeps the user's selection across
+     * re-renders by matching on machine name — so a live edit doesn't kick
+     * them back to machine #1.
+     */
+    private fun rebuildSelector(machines: List<StateMachine>) {
+        val previousName = (machineSelector.selectedItem as? MachineEntry)?.machineName
+        // Suppress fire-on-change while we mutate the model.
+        machineSelector.removeActionListener(selectorListener)
+        try {
+            machineSelector.removeAllItems()
+            machines.forEachIndexed { idx, m -> machineSelector.addItem(MachineEntry(m.name.cleanName(), idx)) }
+            // Hide the chooser entirely when there's nothing to choose between.
+            machineSelector.isVisible = machines.size > 1
+            if (machines.isNotEmpty()) {
+                val matchIdx = (0 until machineSelector.itemCount).firstOrNull { i ->
+                    machineSelector.getItemAt(i).machineName == previousName
+                } ?: 0
+                machineSelector.selectedIndex = matchIdx
+            }
+        } finally {
+            machineSelector.addActionListener(selectorListener)
+        }
+    }
+
+    private fun renderSelected() {
+        if (currentMachines.isEmpty()) return
+        val selected = (machineSelector.selectedItem as? MachineEntry)?.index ?: 0
+        val machine = currentMachines.getOrNull(selected) ?: return
+        renderMachine(machine)
+    }
+
+    private fun renderMachine(machine: StateMachine) {
         val source = PlantUmlGenerator.render(machine)
         currentPlantUml = source
         updateSourceArea(source)
 
         if (source == lastRenderedSource && currentImage != null) {
-            // Identical input — the existing icon is still valid. Touching
-            // the label here would clear it (`updateLabel` unconditionally
-            // nulls the icon to remove any prior error text).
+            // Identical input — the existing icon is still valid.
             return
         }
 
@@ -95,17 +148,13 @@ class StateMachineDiagramPanel {
             ApplicationManager.getApplication().invokeLater {
                 if (image == null) {
                     currentImage = null
-                    // Don't cache the failed source — let the next render attempt retry.
                     updateLabel("Failed to render diagram — see IDE log for details")
                 } else {
                     currentImage = image
                     lastRenderedSource = source
-                    val suffix = if (machines.size > 1) {
-                        " (showing first of ${machines.size} machines)"
-                    } else ""
                     imageLabel.text = null
                     imageLabel.icon = ImageIcon(image)
-                    imageLabel.toolTipText = "${machine.name}$suffix"
+                    imageLabel.toolTipText = machine.name.cleanName()
                     imageContainer.revalidate()
                     imageContainer.repaint()
                 }
@@ -135,4 +184,14 @@ class StateMachineDiagramPanel {
             sourceArea.caretPosition = 0
         }
     }
+
+    /** Combobox row — `1. Hero` style. The numeric prefix disambiguates same-named machines. */
+    private data class MachineEntry(val machineName: String, val index: Int) {
+        override fun toString(): String = "${index + 1}. $machineName"
+    }
+}
+
+private fun String.cleanName(): String {
+    val unquoted = if (length >= 2 && startsWith('"') && endsWith('"')) substring(1, length - 1) else this
+    return if (unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>") "(unnamed)" else unquoted
 }
