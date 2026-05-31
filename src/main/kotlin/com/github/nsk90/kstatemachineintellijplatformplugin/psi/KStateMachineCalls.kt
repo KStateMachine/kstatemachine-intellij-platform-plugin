@@ -28,6 +28,10 @@ internal object KStateMachineCalls {
         add(Declaration("createStateMachine", "ru.nsk.kstatemachine.coroutines", Kind.MACHINE))
         add(Declaration("createStateMachineBlocking", "ru.nsk.kstatemachine.statemachine", Kind.MACHINE))
         add(Declaration("createStdLibStateMachine", "ru.nsk.kstatemachine.statemachine", Kind.MACHINE))
+        // Internal test-only factory used throughout KStateMachine's own unit
+        // tests. Not part of the public API — included here because the plugin
+        // owner needs the tool window to work in the library's test sources.
+        add(Declaration("createTestStateMachine", "ru.nsk.kstatemachine.statemachine", Kind.MACHINE))
         // State factories
         listOf(
             "state", "dataState",
@@ -37,6 +41,10 @@ internal object KStateMachineCalls {
             "choiceState", "initialChoiceState",
             "choiceDataState", "initialChoiceDataState",
             "historyState",
+            // Mutable-data variants (same shape as dataState, but produce
+            // MutableDataState<D> / FinalMutableDataState<D>).
+            "mutableDataState", "initialMutableDataState",
+            "finalMutableDataState", "initialFinalMutableDataState",
         ).forEach { add(Declaration(it, "ru.nsk.kstatemachine.state", Kind.STATE)) }
         // Add-state forms
         add(Declaration("addState", "ru.nsk.kstatemachine.state.State", Kind.ADD_STATE))
@@ -51,6 +59,21 @@ internal object KStateMachineCalls {
     }
 
     private val NAMES: Set<String> = DECLARATIONS.mapTo(mutableSetOf()) { it.name }
+
+    /**
+     * Functions that take a lambda *runtime* callback — listeners, lifecycle
+     * hooks, transition triggers. Their lambda bodies are user code, not DSL
+     * declarations, so the parser must NOT descend into them when scanning a
+     * state-builder scope. Otherwise calls like `state { copy(…) }` (MVI setter,
+     * Compose state, etc.) inside listener bodies would false-positive against
+     * the KStateMachine `state(…)` factory and spawn phantom nodes.
+     */
+    val LISTENER_FUNCTIONS: Set<String> = setOf(
+        "onEntry", "onExit", "onFinished", "onTriggered",
+        "onStateEntry", "onStateExit", "onStateFinished",
+        "onTransitionTriggered", "onTransitionComplete",
+        "onStarted", "onStopped", "onDestroyed",
+    )
 
     /** Cheap name-only check, suitable for the highlighting fast path. */
     fun hasKnownName(name: String): Boolean = name in NAMES

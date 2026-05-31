@@ -54,11 +54,11 @@ object PlantUmlGenerator {
     ) {
         val pad = "  ".repeat(indent)
         val id = ids.getValue(state)
-        val displayName = state.name.trim('"')
+        val displayName = state.displayName()
         val header = if (displayName == id) {
             "state $id"
         } else {
-            "state \"${escape(state.name)}\" as $id"
+            "state \"${escape(displayName)}\" as $id"
         }
         if (state.states.isEmpty()) {
             appendLine("$pad$header")
@@ -153,6 +153,17 @@ object PlantUmlGenerator {
     private fun escape(text: String): String =
         text.trim('"').replace("\"", "\\\"").replace("\n", " ")
 
+    // Friendly display name. Empty / "null" / "<unnamed>" become a type-tagged
+    // placeholder so the reader can tell what kind of node it is, instead of
+    // seeing a bare "<unnamed>".
+    private fun State.displayName(): String {
+        val raw = name.trim('"')
+        if (raw.isBlank() || raw == "null" || raw == "<unnamed>") {
+            return if (this is StateMachine) "Unnamed StateMachine" else "Unnamed State"
+        }
+        return raw
+    }
+
     private fun forEachStateWithAncestors(
         state: State,
         ancestors: List<State>,
@@ -168,6 +179,8 @@ object PlantUmlGenerator {
         StateKind.INITIAL_DATA,
         StateKind.INITIAL_FINAL,
         StateKind.INITIAL_FINAL_DATA,
+        StateKind.INITIAL_MUTABLE_DATA,
+        StateKind.INITIAL_FINAL_MUTABLE_DATA,
         StateKind.INITIAL_CHOICE,
         StateKind.INITIAL_CHOICE_DATA -> true
         else -> false

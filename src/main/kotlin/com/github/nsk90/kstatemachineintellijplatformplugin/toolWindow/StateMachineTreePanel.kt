@@ -132,16 +132,25 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
         when (val data = node.userObject) {
             is StateMachine -> {
                 icon = AllIcons.Nodes.Class
-                append("StateMachine ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                append(displayName(data.name))
+                val resolved = data.name.unquote()
+                if (resolved.isBlank() || resolved == "null" || resolved == "<unnamed>") {
+                    // Unnamed: show just "StateMachine" — don't duplicate the type word.
+                    append("StateMachine")
+                } else {
+                    append("StateMachine ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    append(resolved)
+                }
+                if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 val counts = data.subtreeCounts()
                 append("  (${counts.first} states, ${counts.second} transitions)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
             }
             is State -> {
                 icon = data.kind.icon()
-                append(displayName(data.name))
+                append(displayName(data.name, "State"))
                 val tag = data.kind.label()
                 if (tag != null) append("  $tag", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                if (data.dataType != null) append("  <${data.dataType}>", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.transitions.isNotEmpty()) {
                     append("  (${data.transitions.size} transition${if (data.transitions.size == 1) "" else "s"})", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 }
@@ -150,11 +159,16 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                 icon = AllIcons.Actions.Forward
                 append(data.transitionLabel())
                 val suffix = buildString {
-                    if (data.eventType != null && !data.transitionLabel().contains(data.eventType)) {
-                        append("  <${data.eventType}>")
+                    val typeArgs = data.typeArgsDisplay()
+                    if (typeArgs != null && !data.transitionLabel().contains(typeArgs)) {
+                        append("  $typeArgs")
                     }
                     if (!data.targetStateName.isNullOrBlank()) {
-                        append("  → ${data.targetStateName}")
+                        append("  → ${data.targetStateName.unquote()}")
+                    }
+                    val tags = data.transitionTags()
+                    if (tags.isNotEmpty()) {
+                        append("  [${tags.joinToString(", ")}]")
                     }
                 }
                 if (suffix.isNotEmpty()) {
@@ -166,14 +180,54 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
     }
 }
 
-private fun displayName(rawName: String): String =
-    if (rawName.isBlank() || rawName == "null" || rawName == "<unnamed>") "State (unnamed)" else rawName
-
-private fun Transition.transitionLabel(): String = when {
-    name.isNotBlank() && name != "null" && name != "<unnamed>" -> name
-    eventType != null -> "on $eventType"
-    else -> "(unnamed transition)"
+private fun displayName(rawName: String, typeLabel: String): String {
+    val unquoted = rawName.unquote()
+    return if (unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>") typeLabel else unquoted
 }
+
+private fun Transition.transitionLabel(): String {
+    val unquoted = name.unquote()
+    return when {
+        unquoted.isNotBlank() && unquoted != "null" && unquoted != "<unnamed>" -> unquoted
+        eventType != null -> "on $eventType"
+        else -> "Transition"
+    }
+}
+
+// `<EventType>` or `<EventType, DataType>` for data transitions. Returns null
+// when no type information is available.
+private fun Transition.typeArgsDisplay(): String? {
+    if (eventType == null && dataType == null) return null
+    val parts = listOfNotNull(eventType, dataType)
+    return "<${parts.joinToString(", ")}>"
+}
+
+// Categorical tags shown after a transition. A single transition may carry
+// several (e.g. a `dataTransitionOn` with a guard and no resolvable target →
+// `[data, dynamic, guarded, targetless]`).
+//
+// `choice` is NOT a transition tag — it belongs to `choiceState` factory calls
+// and is rendered as the state's kind label (`(choice)`).
+private fun Transition.transitionTags(): List<String> = buildList {
+    when (callee) {
+        "transitionOn" -> add("dynamic")
+        "transitionConditionally" -> add("conditional")
+        "dataTransition" -> add("data")
+        "dataTransitionOn" -> {
+            add("data")
+            add("dynamic")
+        }
+    }
+    if (isGuarded) add("guarded")
+    if (targetStateName.isNullOrBlank()) add("targetless")
+}
+
+// Argument values come from the PSI as raw expression text — string literals
+// arrive with their surrounding quotes ("Jump"). Strip them so the tree shows
+// Jump rather than "Jump". Non-string-literal values (variable refs, enum
+// constants) don't have surrounding quotes and pass through unchanged.
+private fun String.unquote(): String =
+    if (length >= 2 && startsWith('"') && endsWith('"')) substring(1, length - 1) else this
 
 // Recursively count substates and transitions under a state.
 private fun State.subtreeCounts(): Pair<Int, Int> {
@@ -189,13 +243,13 @@ private fun State.subtreeCounts(): Pair<Int, Int> {
 }
 
 private fun StateKind.icon() = when (this) {
-    StateKind.INITIAL, StateKind.INITIAL_DATA -> AllIcons.Actions.Execute
-    StateKind.FINAL, StateKind.FINAL_DATA -> AllIcons.Actions.Suspend
-    StateKind.INITIAL_FINAL, StateKind.INITIAL_FINAL_DATA -> AllIcons.Actions.Suspend
+    StateKind.INITIAL, StateKind.INITIAL_DATA, StateKind.INITIAL_MUTABLE_DATA -> AllIcons.Actions.Execute
+    StateKind.FINAL, StateKind.FINAL_DATA, StateKind.FINAL_MUTABLE_DATA -> AllIcons.Actions.Suspend
+    StateKind.INITIAL_FINAL, StateKind.INITIAL_FINAL_DATA, StateKind.INITIAL_FINAL_MUTABLE_DATA -> AllIcons.Actions.Suspend
     StateKind.CHOICE, StateKind.CHOICE_DATA -> AllIcons.Vcs.Branch
     StateKind.INITIAL_CHOICE, StateKind.INITIAL_CHOICE_DATA -> AllIcons.Vcs.Branch
     StateKind.HISTORY -> AllIcons.Vcs.History
-    StateKind.STATE, StateKind.DATA -> AllIcons.Nodes.ModelClass
+    StateKind.STATE, StateKind.DATA, StateKind.MUTABLE_DATA -> AllIcons.Nodes.ModelClass
 }
 
 private fun StateKind.label(): String? = when (this) {
@@ -207,6 +261,10 @@ private fun StateKind.label(): String? = when (this) {
     StateKind.INITIAL_DATA -> "(initial data)"
     StateKind.FINAL_DATA -> "(final data)"
     StateKind.INITIAL_FINAL_DATA -> "(initial, final data)"
+    StateKind.MUTABLE_DATA -> "(mutable data)"
+    StateKind.INITIAL_MUTABLE_DATA -> "(initial mutable data)"
+    StateKind.FINAL_MUTABLE_DATA -> "(final mutable data)"
+    StateKind.INITIAL_FINAL_MUTABLE_DATA -> "(initial, final mutable data)"
     StateKind.CHOICE -> "(choice)"
     StateKind.INITIAL_CHOICE -> "(initial choice)"
     StateKind.CHOICE_DATA -> "(choice data)"

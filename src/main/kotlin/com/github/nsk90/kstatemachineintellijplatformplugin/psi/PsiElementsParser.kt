@@ -10,12 +10,16 @@ import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtBinaryExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtStringTemplateExpression
 
 private const val NAME_ARGUMENT = "name"
 private const val STATE_ARGUMENT = "state"
+private const val CHILD_MODE_ARGUMENT = "childMode"
 private const val TARGET_STATE_PROPERTY = "targetState"
+private const val GUARD_PROPERTY = "guard"
 
 fun interface Output {
     fun write(message: String)
@@ -46,11 +50,17 @@ class PsiElementsParser(private val output: Output) {
                 KStateMachineCalls.Kind.ADD_STATE -> states += parseAddState(call, pointerManager)
                 KStateMachineCalls.Kind.TRANSITION -> {
                     val transitionName = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
+                    val calleeText = call.calleeExpression?.text
                     transitions += Transition(
                         name = transitionName,
                         pointer = pointerManager.createSmartPsiElementPointer(call),
                         targetStateName = call.findTargetStateName(),
                         eventType = call.typeArguments.firstOrNull()?.text,
+                        callee = calleeText,
+                        isGuarded = call.findLambdaAssignment(GUARD_PROPERTY) != null,
+                        // dataTransition<E, D> / dataTransitionOn<E, D> — D is the 2nd type arg.
+                        dataType = if (calleeText in DATA_TRANSITION_CALLEES)
+                            call.typeArguments.getOrNull(1)?.text else null,
                     )
                 }
                 KStateMachineCalls.Kind.MACHINE -> {
@@ -60,6 +70,16 @@ class PsiElementsParser(private val output: Output) {
                     states += parseMachine(call, pointerManager)
                 }
                 null -> {
+                    // Listener bodies (`onEntry`, `onTransitionComplete`, etc.)
+                    // are runtime callbacks. They aren't DSL builders, and
+                    // descending into them produces false positives — e.g. an
+                    // MVI `state { copy(…) }` setter inside an `onTransitionComplete`
+                    // body would match the catalog's "state" name and spawn a
+                    // phantom node. Skip them.
+                    val callee = call.calleeExpression?.text
+                    if (callee != null && callee in KStateMachineCalls.LISTENER_FUNCTIONS) {
+                        return@forEach
+                    }
                     // Unrecognized callee with a lambda is most likely the
                     // `state.invoke { … }` operator-call pattern that the DSL
                     // uses to configure a state held in a variable
@@ -81,12 +101,18 @@ class PsiElementsParser(private val output: Output) {
     private fun parseState(call: KtCallExpression, pointerManager: SmartPointerManager): State {
         val name = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
         val (substates, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
+        val kind = call.kindFromCallee()
         return State(
             name = name,
             states = substates,
             transitions = transitions,
             pointer = pointerManager.createSmartPsiElementPointer(call),
-            kind = call.kindFromCallee(),
+            kind = kind,
+            isParallel = call.isParallelChildMode(),
+            // dataState<D> / initialDataState<D> / finalDataState<D> /
+            // initialFinalDataState<D> / choiceDataState<D> /
+            // initialChoiceDataState<D> — the D is the first (and only) type arg.
+            dataType = if (kind.isData()) call.typeArguments.firstOrNull()?.text else null,
         )
     }
 
@@ -104,6 +130,7 @@ class PsiElementsParser(private val output: Output) {
             transitions = transitions,
             pointer = pointerManager.createSmartPsiElementPointer(call),
             kind = call.addStateKindFromCallee(),
+            isParallel = call.isParallelChildMode(),
         )
     }
 
@@ -118,6 +145,7 @@ class PsiElementsParser(private val output: Output) {
             states = states,
             transitions = transitions,
             pointer = pointerManager.createSmartPsiElementPointer(call),
+            isParallel = call.isParallelChildMode(),
         )
     }
 }
@@ -151,6 +179,22 @@ private fun KtCallExpression.isNestedInsideMachineCall(): Boolean {
     return false
 }
 
+private val DATA_TRANSITION_CALLEES = setOf("dataTransition", "dataTransitionOn")
+
+private fun StateKind.isData(): Boolean = when (this) {
+    StateKind.DATA,
+    StateKind.INITIAL_DATA,
+    StateKind.FINAL_DATA,
+    StateKind.INITIAL_FINAL_DATA,
+    StateKind.MUTABLE_DATA,
+    StateKind.INITIAL_MUTABLE_DATA,
+    StateKind.FINAL_MUTABLE_DATA,
+    StateKind.INITIAL_FINAL_MUTABLE_DATA,
+    StateKind.CHOICE_DATA,
+    StateKind.INITIAL_CHOICE_DATA -> true
+    else -> false
+}
+
 private fun KtCallExpression.kindFromCallee(): StateKind = when (calleeExpression?.text) {
     "initialState" -> StateKind.INITIAL
     "finalState" -> StateKind.FINAL
@@ -159,6 +203,10 @@ private fun KtCallExpression.kindFromCallee(): StateKind = when (calleeExpressio
     "initialDataState" -> StateKind.INITIAL_DATA
     "finalDataState" -> StateKind.FINAL_DATA
     "initialFinalDataState" -> StateKind.INITIAL_FINAL_DATA
+    "mutableDataState" -> StateKind.MUTABLE_DATA
+    "initialMutableDataState" -> StateKind.INITIAL_MUTABLE_DATA
+    "finalMutableDataState" -> StateKind.FINAL_MUTABLE_DATA
+    "initialFinalMutableDataState" -> StateKind.INITIAL_FINAL_MUTABLE_DATA
     "choiceState" -> StateKind.CHOICE
     "initialChoiceState" -> StateKind.INITIAL_CHOICE
     "choiceDataState" -> StateKind.CHOICE_DATA
@@ -179,8 +227,16 @@ private fun KtCallExpression.findTargetStateName(): String? {
         ?.firstOrNull { it.getArgumentName()?.asName?.asString() == TARGET_STATE_PROPERTY }
         ?.getArgumentExpression()?.text
         ?.let { return it }
-
     // (2) Assignment inside the lambda body: `transition<E> { targetState = Foo }`
+    return findLambdaAssignment(TARGET_STATE_PROPERTY)
+}
+
+/**
+ * Walk the call's trailing-lambda body looking for `propertyName = <expr>`
+ * (a simple-name assignment). Used for both `targetState = …` and `guard = …`.
+ * Skips nested lambdas so we stay in the immediate transition scope.
+ */
+private fun KtCallExpression.findLambdaAssignment(propertyName: String): String? {
     val body = dslLambda()?.bodyExpression ?: return null
     var found: String? = null
     fun walk(element: PsiElement) {
@@ -189,7 +245,7 @@ private fun KtCallExpression.findTargetStateName(): String? {
             if (child is KtLambdaExpression) continue
             if (child is KtBinaryExpression
                 && child.operationToken == KtTokens.EQ
-                && child.left?.text == TARGET_STATE_PROPERTY
+                && child.left?.text == propertyName
             ) {
                 found = child.right?.text
                 return
@@ -199,6 +255,28 @@ private fun KtCallExpression.findTargetStateName(): String? {
     }
     walk(body)
     return found
+}
+
+/**
+ * True if the call passes `ChildMode.PARALLEL` for the `childMode` parameter.
+ *
+ * Accepts either form:
+ *   state("x", childMode = ChildMode.PARALLEL) { … }    // named
+ *   createStateMachineBlocking(scope, "x", ChildMode.PARALLEL, …)  // positional
+ *
+ * For positional we accept any argument whose text ends in `.PARALLEL` or is
+ * the bare `PARALLEL` enum constant — both unambiguous in KStateMachine
+ * context since `PARALLEL` only appears on the `ChildMode` enum.
+ */
+private fun KtCallExpression.isParallelChildMode(): Boolean {
+    val args = valueArgumentList?.arguments.orEmpty()
+    return args.any { arg ->
+        val argName = arg.getArgumentName()?.asName?.asString()
+        // If the arg IS named but isn't `childMode`, skip.
+        if (argName != null && argName != CHILD_MODE_ARGUMENT) return@any false
+        val text = arg.getArgumentExpression()?.text?.trim() ?: return@any false
+        text == "PARALLEL" || text.endsWith(".PARALLEL")
+    }
 }
 
 internal fun KtCallExpression.dslLambda(): KtLambdaExpression? =
@@ -221,34 +299,65 @@ private fun KtLambdaExpression.directCallExpressions(): List<KtCallExpression> {
 }
 
 /**
- * PSI-only argument extractor. Returns the raw text of [argumentName]'s value
- * in [callExpression], or null if the argument isn't explicitly passed.
+ * PSI-only argument extractor. Returns a human-friendly string for
+ * [argumentName]'s value in [callExpression], or null if not provided.
  *
- * Matches by named argument first (e.g. `state(name = "red")`). If [argumentName]
- * is "name" we additionally accept the first positional argument — the KStateMachine
- * DSL convention is `state("red")` without naming the parameter explicitly.
+ * Resolution order:
+ * 1. Explicit named argument (`state(name = "red")`).
+ * 2. For [NAME_ARGUMENT]: prefer the first **string-literal** positional arg —
+ *    this avoids picking up `createStateMachineBlocking(scope, "Hero", …)`'s
+ *    `scope` (1st positional) as the machine name when "Hero" (2nd) is what
+ *    the user means.
+ * 3. For [STATE_ARGUMENT]: take the first positional and simplify
+ *    constructor-call expressions to their type name —
+ *    `addState(AirAttacking())` → "AirAttacking", not "AirAttacking()".
+ * 4. Generic fallback: text of the first positional argument.
  *
- * We don't try to resolve default values here. Going PSI-only intentionally
- * avoids the K1 analysis API (deprecated in modern Kotlin plugin builds) and is
- * good enough because every KStateMachine state/transition factory either gives
- * the value inline or leaves it to default to `null`, which our renderer
- * displays as "(unnamed)".
+ * Going PSI-only intentionally avoids the K1 analysis API (deprecated in
+ * modern Kotlin plugin builds). We can't resolve defaults; returning null is
+ * fine because the renderers display "(Unnamed …)" for missing names.
  */
 private fun findArgumentValueWithDefaults(
     callExpression: KtCallExpression,
     argumentName: String
 ): String? {
     val args = callExpression.valueArgumentList?.arguments.orEmpty()
+
+    // (1) Explicit named argument.
     args.firstOrNull { it.getArgumentName()?.asName?.asString() == argumentName }
         ?.getArgumentExpression()?.text
         ?.let { return it }
 
-    // Fallback to the first positional arg. KStateMachine DSL convention puts
-    // the "primary" parameter first: state("red") / addState(myState) /
-    // transition<E>("name") — so this lookup is right for all our call sites.
+    // (2) For machine / state / transition names, the user almost always
+    // passes a string literal. Picking the first string-literal positional
+    // argument lets `createStateMachineBlocking(scope, "Hero", …)` resolve
+    // correctly even though `scope` is the first positional slot.
+    if (argumentName == NAME_ARGUMENT) {
+        args.firstOrNull {
+            it.getArgumentName() == null && it.getArgumentExpression() is KtStringTemplateExpression
+        }?.getArgumentExpression()?.text?.let { return it }
+    }
+
+    // (3) addState(MyState()) → "MyState" (drop the constructor parens).
+    if (argumentName == STATE_ARGUMENT) {
+        args.firstOrNull { it.getArgumentName() == null }
+            ?.getArgumentExpression()
+            ?.simplifiedStateName()
+            ?.let { return it }
+    }
+
+    // (4) Generic positional fallback.
     args.firstOrNull { it.getArgumentName() == null }
         ?.getArgumentExpression()?.text
         ?.let { return it }
 
     return null
+}
+
+// Constructor-call args like `AirAttacking()` reduce to their callee text
+// "AirAttacking", which renders much more cleanly in the tree / diagram than
+// the raw expression with its empty parens.
+private fun KtExpression.simplifiedStateName(): String = when (this) {
+    is KtCallExpression -> calleeExpression?.text ?: text
+    else -> text
 }

@@ -79,7 +79,9 @@ class StateMachineDiagramPanel {
         updateSourceArea(source)
 
         if (source == lastRenderedSource && currentImage != null) {
-            updateLabel(null)
+            // Identical input — the existing icon is still valid. Touching
+            // the label here would clear it (`updateLabel` unconditionally
+            // nulls the icon to remove any prior error text).
             return
         }
 
@@ -91,11 +93,13 @@ class StateMachineDiagramPanel {
                 null
             }
             ApplicationManager.getApplication().invokeLater {
-                currentImage = image
-                lastRenderedSource = source
                 if (image == null) {
+                    currentImage = null
+                    // Don't cache the failed source — let the next render attempt retry.
                     updateLabel("Failed to render diagram — see IDE log for details")
                 } else {
+                    currentImage = image
+                    lastRenderedSource = source
                     val suffix = if (machines.size > 1) {
                         " (showing first of ${machines.size} machines)"
                     } else ""

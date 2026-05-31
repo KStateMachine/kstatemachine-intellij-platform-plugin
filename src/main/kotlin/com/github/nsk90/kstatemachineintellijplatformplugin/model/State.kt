@@ -12,6 +12,10 @@ enum class StateKind {
     INITIAL_DATA,
     FINAL_DATA,
     INITIAL_FINAL_DATA,
+    MUTABLE_DATA,
+    INITIAL_MUTABLE_DATA,
+    FINAL_MUTABLE_DATA,
+    INITIAL_FINAL_MUTABLE_DATA,
     CHOICE,
     INITIAL_CHOICE,
     CHOICE_DATA,
@@ -25,4 +29,7 @@ open class State(
     val transitions: List<Transition>,
     val pointer: SmartPsiElementPointer<KtCallExpression>? = null,
     val kind: StateKind = StateKind.STATE,
+    val isParallel: Boolean = false,
+    /** For `dataState<D>` and its initial/final/choice variants — the `D` type-arg text, e.g. `MyPayload`. */
+    val dataType: String? = null,
 )

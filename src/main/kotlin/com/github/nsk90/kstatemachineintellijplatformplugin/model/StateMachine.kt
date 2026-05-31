@@ -8,4 +8,5 @@ class StateMachine(
     states: List<State>,
     transitions: List<Transition>,
     pointer: SmartPsiElementPointer<KtCallExpression>? = null,
-) : State(name, states, transitions, pointer, StateKind.STATE)
+    isParallel: Boolean = false,
+) : State(name, states, transitions, pointer, StateKind.STATE, isParallel)
