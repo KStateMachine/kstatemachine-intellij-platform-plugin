@@ -97,22 +97,34 @@ class StateMachineDiagramPanel {
     }
 
     /**
-     * Repopulates the machine dropdown. Keeps the user's selection across
-     * re-renders by matching on machine name — so a live edit doesn't kick
-     * them back to machine #1.
+     * Repopulates the machine dropdown. Labels match the tree's convention
+     * exactly so the user can read `StateMachine #2` in the tree and find the
+     * same entry in the dropdown without guessing. Keeps the user's selection
+     * across re-renders by matching on the rendered label.
      */
     private fun rebuildSelector(machines: List<StateMachine>) {
-        val previousName = (machineSelector.selectedItem as? MachineEntry)?.machineName
+        val previousLabel = (machineSelector.selectedItem as? MachineEntry)?.label
         // Suppress fire-on-change while we mutate the model.
         machineSelector.removeActionListener(selectorListener)
         try {
             machineSelector.removeAllItems()
-            machines.forEachIndexed { idx, m -> machineSelector.addItem(MachineEntry(m.name.cleanName(), idx)) }
+            // Per-file index of unnamed machines, mirroring the tree's
+            // computeUnnamedIndices top-level counter.
+            var unnamedCounter = 0
+            machines.forEachIndexed { idx, m ->
+                val label = if (m.name.isMachineUnnamed()) {
+                    unnamedCounter++
+                    "StateMachine #$unnamedCounter"
+                } else {
+                    m.name.unquoteName()
+                }
+                machineSelector.addItem(MachineEntry(label, idx))
+            }
             // Hide the chooser entirely when there's nothing to choose between.
             machineSelector.isVisible = machines.size > 1
             if (machines.isNotEmpty()) {
                 val matchIdx = (0 until machineSelector.itemCount).firstOrNull { i ->
-                    machineSelector.getItemAt(i).machineName == previousName
+                    machineSelector.getItemAt(i).label == previousLabel
                 } ?: 0
                 machineSelector.selectedIndex = matchIdx
             }
@@ -154,7 +166,8 @@ class StateMachineDiagramPanel {
                     lastRenderedSource = source
                     imageLabel.text = null
                     imageLabel.icon = ImageIcon(image)
-                    imageLabel.toolTipText = machine.name.cleanName()
+                    imageLabel.toolTipText = (machineSelector.selectedItem as? MachineEntry)?.label
+                        ?: machine.name.unquoteName()
                     imageContainer.revalidate()
                     imageContainer.repaint()
                 }
@@ -185,13 +198,23 @@ class StateMachineDiagramPanel {
         }
     }
 
-    /** Combobox row — `1. Hero` style. The numeric prefix disambiguates same-named machines. */
-    private data class MachineEntry(val machineName: String, val index: Int) {
-        override fun toString(): String = "${index + 1}. $machineName"
+    /**
+     * Combobox row. `label` is the display string already in tree-matching
+     * form (`Hero` for named, `StateMachine #2` for unnamed). `index` is the
+     * machine's position in the source list so [renderSelected] can look it
+     * up again.
+     */
+    private data class MachineEntry(val label: String, val index: Int) {
+        override fun toString(): String = label
     }
 }
 
-private fun String.cleanName(): String {
-    val unquoted = if (length >= 2 && startsWith('"') && endsWith('"')) substring(1, length - 1) else this
-    return if (unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>") "(unnamed)" else unquoted
+/** Strip a single pair of surrounding double quotes — that's how string-literal names arrive from the parser. */
+private fun String.unquoteName(): String =
+    if (length >= 2 && startsWith('"') && endsWith('"')) substring(1, length - 1) else this
+
+/** Matches the parser's `<unnamed>` sentinel, plain blank, or the literal text `null`. */
+private fun String.isMachineUnnamed(): Boolean {
+    val u = unquoteName()
+    return u.isBlank() || u == "null" || u == "<unnamed>"
 }
