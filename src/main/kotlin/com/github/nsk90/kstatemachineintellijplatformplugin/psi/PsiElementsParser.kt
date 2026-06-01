@@ -127,6 +127,10 @@ class PsiElementsParser(private val output: Output) {
             // initialChoiceDataState<D> — the D is the first (and only) type arg.
             dataType = if (kind.isData()) call.typeArguments.firstOrNull()?.text else null,
             defaultData = if (kind.isData()) call.findDefaultData() else null,
+            // choiceState / initialChoiceState / choiceDataState /
+            // initialChoiceDataState — the lambda body is a redirect expression
+            // returning the target state. Try to resolve it when it's simple.
+            redirectTarget = if (kind.isChoice()) call.findChoiceRedirectTarget() else null,
         )
     }
 
@@ -218,6 +222,14 @@ private fun StateKind.isData(): Boolean = when (this) {
     else -> false
 }
 
+private fun StateKind.isChoice(): Boolean = when (this) {
+    StateKind.CHOICE,
+    StateKind.INITIAL_CHOICE,
+    StateKind.CHOICE_DATA,
+    StateKind.INITIAL_CHOICE_DATA -> true
+    else -> false
+}
+
 private fun KtCallExpression.kindFromCallee(): StateKind = when (calleeExpression?.text) {
     "initialState" -> StateKind.INITIAL
     "finalState" -> StateKind.FINAL
@@ -294,14 +306,19 @@ private fun KtCallExpression.findTargetStateName(): String? {
 
 /**
  * Follow [expr] back to the underlying KStateMachine state-factory call (if any)
- * and return that call's name argument. Handles three shapes:
+ * and return that call's name argument. Handles:
  *
  *   - String literal: returns the literal text directly.
  *   - Direct factory call (`state("X")` / `addState(MyState())` / `createStateMachine(…, "Y")`):
  *     returns the name extracted from the call's arguments.
- *   - Identifier (`KtNameReferenceExpression`): walks back to its `val`/`var`
- *     declaration and recurses on the initializer, so chains like
- *     `val a = state("X"); val b = a; targetState = b` still resolve to `"X"`.
+ *   - Identifier (`KtNameReferenceExpression`): tries, in order —
+ *       1. local/file val/var: walk back to its declaration and recurse on
+ *          the initializer (so chains like `val a = state("X"); val b = a`
+ *          still resolve to `"X"`);
+ *       2. same-file object declaration: `object State2 : DefaultState()`
+ *          (top-level OR nested inside a sealed-class body — the standard
+ *          KStateMachine state-singleton pattern) → returns the object's own
+ *          name.
  *
  * Capped recursion depth as a safety belt; null when nothing resolves.
  */
@@ -316,10 +333,40 @@ private fun resolveStateNameFromExpr(expr: KtExpression?, depth: Int = 0): Strin
                 findArgumentValueWithDefaults(expr, STATE_ARGUMENT)
             else -> null
         }
-        is KtNameReferenceExpression ->
-            resolveStateNameFromExpr(expr.resolveLocalInitializer(), depth + 1)
+        is KtNameReferenceExpression -> {
+            // Try the val/var-binding path first; if nothing there, try the
+            // same-file object-declaration path (covers the
+            // `sealed class HeroState { object Standing : HeroState() }`
+            // pattern that KStateMachine users overwhelmingly favour).
+            expr.resolveLocalInitializer()
+                ?.let { return resolveStateNameFromExpr(it, depth + 1) }
+            expr.findObjectDeclarationInFile()
+        }
         else -> null
     }
+}
+
+/**
+ * Look for an `object <this.text>` declaration anywhere in the same file:
+ *   - top-level objects, and
+ *   - objects nested inside top-level `class`/`sealed class` bodies (typical
+ *     `sealed class HeroState { object Standing : HeroState() }` shape).
+ * Returns the object's own name when found.
+ */
+private fun KtNameReferenceExpression.findObjectDeclarationInFile(): String? {
+    val target = text
+    fun search(declarations: List<org.jetbrains.kotlin.psi.KtDeclaration>): String? {
+        for (decl in declarations) {
+            when (decl) {
+                is KtObjectDeclaration -> if (decl.name == target) return decl.name
+                is KtClass -> decl.body?.declarations?.let { nested ->
+                    search(nested)?.let { return it }
+                }
+            }
+        }
+        return null
+    }
+    return search(containingKtFile.declarations)
 }
 
 /**
@@ -346,6 +393,33 @@ private fun KtCallExpression.findLambdaAssignment(propertyName: String): String?
     }
     walk(body)
     return found
+}
+
+/**
+ * For `choiceState`-family calls, look at the trailing lambda body. If it's a
+ * single expression that resolves to a state factory call (directly or via a
+ * local val chain), return that state's name. Returns null when the body has
+ * multiple statements or contains branching/computed logic — there's no
+ * single deterministic target to point at in that case.
+ *
+ * Same resolution path the transition target uses; reuses [resolveStateNameFromExpr].
+ */
+private fun KtCallExpression.findChoiceRedirectTarget(): String? {
+    val body = dslLambda()?.bodyExpression ?: return null
+    val single = body.statements.singleOrNull() ?: return null
+    // Structural resolution first (val/var chains, factory calls, same-file
+    // object declarations). If that returns null, fall back to the raw
+    // identifier text — that handles cross-file object references like
+    // `{ State2 }` where `State2` is an `object` defined in another module
+    // and imported here; we can't statically verify it's a State without
+    // binding context, but in a choiceState lambda the user's intent is
+    // unambiguous, so trusting the identifier is the right trade-off.
+    resolveStateNameFromExpr(single)?.let { return it }
+    return when (single) {
+        is KtNameReferenceExpression -> single.text
+        is KtDotQualifiedExpression -> (single.selectorExpression as? KtNameReferenceExpression)?.text
+        else -> null
+    }
 }
 
 /**

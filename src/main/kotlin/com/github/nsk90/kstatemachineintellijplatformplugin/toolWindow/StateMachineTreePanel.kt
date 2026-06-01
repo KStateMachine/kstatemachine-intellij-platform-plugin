@@ -61,21 +61,26 @@ class StateMachineTreePanel(private val project: Project) {
     }
 
     /**
-     * Right-click handler for transition rows. Shows a popup with
-     * "Navigate to target state" when the transition's `targetState` can be
-     * matched against a single state node in the same tree. Lambda-form
-     * targets (transitionOn's `{ … }`) and unresolved targets get no popup —
-     * there's nothing actionable to offer.
+     * Right-click handler for rows that point at another state. Shows a popup
+     * with "Navigate to target state" when:
+     *   - the row is a `Transition` and its `targetState` resolves to a single
+     *     tree node, OR
+     *   - the row is a `choiceState`-family `State` whose lambda body resolves
+     *     to a single tree node.
+     * Otherwise no popup — nothing actionable.
      */
     private fun maybeShowTransitionPopup(e: MouseEvent) {
         val path = tree.getPathForLocation(e.x, e.y) ?: return
         val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
-        val transition = node.userObject as? Transition ?: return
-        val targetNode = findTargetStateNode(transition) ?: return
+        val targetNode = when (val data = node.userObject) {
+            is Transition -> findTargetStateNode(data)
+            is State -> findChoiceTargetNode(data)
+            else -> null
+        } ?: return
 
         // Select the right-clicked row first so the popup visibly belongs to it.
-        // Suppress the selection listener so we don't open the *transition's*
-        // source location — the menu click will jump to the *target* instead.
+        // Suppress the selection listener so we don't open the source location
+        // of the row itself — the menu click will jump to the *target* instead.
         suppressSelectionEvents = true
         try {
             tree.selectionPath = path
@@ -88,6 +93,13 @@ class StateMachineTreePanel(private val project: Project) {
                 addActionListener { selectNode(targetNode) }
             })
         }.show(tree, e.x, e.y)
+    }
+
+    private fun findChoiceTargetNode(state: State): DefaultMutableTreeNode? {
+        val raw = state.redirectTarget?.trim() ?: return null
+        val target = raw.removeSurrounding("\"").trim()
+        if (target.isEmpty()) return null
+        return findStateNodeByName(rootNode, target)
     }
 
     private fun findTargetStateNode(transition: Transition): DefaultMutableTreeNode? {
@@ -255,6 +267,9 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                 if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.dataType != null) append("  <${data.dataType}>", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.defaultData != null) append("  defaultData = ${data.defaultData}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                if (data.redirectTarget != null) {
+                    append("  → ${data.redirectTarget.unquote()}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
             }
             is Transition -> {
                 icon = AllIcons.Actions.Forward

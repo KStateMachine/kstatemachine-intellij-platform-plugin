@@ -35,4 +35,12 @@ open class State(
     val dataType: String? = null,
     /** For data states — raw expression text passed to the `defaultData` argument (`null` when absent). */
     val defaultData: String? = null,
+    /**
+     * For `choiceState`-family pseudo-states — the resolved name of the single
+     * target their lambda body redirects to, when the body is simple enough to
+     * resolve (single identifier / state factory call / chain of vals). Null
+     * for non-choice states or for complex/dynamic lambdas like
+     * `{ if (…) A else B }`.
+     */
+    val redirectTarget: String? = null,
 )
