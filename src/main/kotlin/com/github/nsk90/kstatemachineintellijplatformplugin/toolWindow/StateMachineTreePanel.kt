@@ -4,7 +4,9 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.State
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateKind
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
+import com.github.nsk90.kstatemachineintellijplatformplugin.services.StateMachineViewService
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.SmartPsiElementPointer
@@ -47,6 +49,12 @@ class StateMachineTreePanel(private val project: Project) {
         tree.addTreeSelectionListener {
             if (suppressSelectionEvents) return@addTreeSelectionListener
             val node = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return@addTreeSelectionListener
+            // Mirror the selection into the diagram dropdown — if the user
+            // then switches tabs, the Diagram already shows the machine they
+            // were just exploring in the tree.
+            node.topLevelMachine()?.let { machine ->
+                project.service<StateMachineViewService>().diagramPanel?.selectMachine(machine)
+            }
             val pointer = node.pointer() ?: return@addTreeSelectionListener
             navigateToPointer(pointer)
         }
@@ -163,6 +171,22 @@ class StateMachineTreePanel(private val project: Project) {
             current = current.parent as? DefaultMutableTreeNode
         }
         return null
+    }
+
+    /**
+     * The outermost (top-level) [StateMachine] containing this node — i.e. the
+     * one that appears in the diagram tab's dropdown. Walks all the way to the
+     * root, recording each StateMachine seen; the last one is the top-level.
+     * Used to sync tree selection into the diagram dropdown.
+     */
+    private fun DefaultMutableTreeNode.topLevelMachine(): StateMachine? {
+        var current: DefaultMutableTreeNode? = this
+        var outermost: StateMachine? = null
+        while (current != null) {
+            (current.userObject as? StateMachine)?.let { outermost = it }
+            current = current.parent as? DefaultMutableTreeNode
+        }
+        return outermost
     }
 
     private fun selectNode(target: DefaultMutableTreeNode) {

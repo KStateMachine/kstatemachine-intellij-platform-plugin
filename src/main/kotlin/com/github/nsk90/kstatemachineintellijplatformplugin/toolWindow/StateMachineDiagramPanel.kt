@@ -6,6 +6,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.IdeBorderFactory
+import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -97,6 +98,24 @@ class StateMachineDiagramPanel {
     }
 
     /**
+     * Switch the dropdown to the entry for [machine]. Used by the tree panel
+     * so that selecting a node inside machine B in the Structure tab
+     * automatically shows machine B in the Diagram tab when the user
+     * switches over. No-op if the machine isn't in the current list or is
+     * already selected.
+     */
+    fun selectMachine(machine: StateMachine) {
+        val targetIdx = currentMachines.indexOfFirst { it === machine }
+        if (targetIdx < 0) return
+        val currentEntry = machineSelector.selectedItem as? MachineEntry
+        if (currentEntry?.index == targetIdx) return
+        val itemIdx = (0 until machineSelector.itemCount).firstOrNull {
+            machineSelector.getItemAt(it).index == targetIdx
+        } ?: return
+        machineSelector.selectedIndex = itemIdx
+    }
+
+    /**
      * Repopulates the machine dropdown. Labels match the tree's convention
      * exactly so the user can read `StateMachine #2` in the tree and find the
      * same entry in the dropdown without guessing. Keeps the user's selection
@@ -141,7 +160,10 @@ class StateMachineDiagramPanel {
     }
 
     private fun renderMachine(machine: StateMachine) {
-        val source = PlantUmlGenerator.render(machine)
+        // Read the LaF flag at render time so a theme change between renders
+        // produces a different source string and naturally invalidates the
+        // image cache (no separate listener required).
+        val source = PlantUmlGenerator.render(machine, darkTheme = !JBColor.isBright())
         currentPlantUml = source
         updateSourceArea(source)
 

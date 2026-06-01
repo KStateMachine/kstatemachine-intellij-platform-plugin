@@ -18,7 +18,7 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
  */
 object PlantUmlGenerator {
 
-    fun render(machine: StateMachine): String = buildString {
+    fun render(machine: StateMachine, darkTheme: Boolean = false): String = buildString {
         appendLine("@startuml")
         appendLine("!pragma layout smetana")
         // Force vertical layout — the plugin's tool window is taller than it
@@ -27,6 +27,7 @@ object PlantUmlGenerator {
         // PlantUML directive for this.
         appendLine("top to bottom direction")
         appendLine("hide empty description")
+        if (darkTheme) appendDarkSkinparams()
         appendLine()
 
         // Index unnamed states / transitions / nested machines per-machine,
@@ -103,6 +104,32 @@ object PlantUmlGenerator {
             }
         }
         walk(machine)
+    }
+
+    /**
+     * Skinparams tuned to roughly match Darcula's editor palette so the
+     * rendered PNG doesn't look out of place when embedded in the dark IDE.
+     * Embedded in the source string itself — so a theme change naturally
+     * busts the render cache (different source → cache miss → re-render).
+     */
+    private fun StringBuilder.appendDarkSkinparams() {
+        appendLine("skinparam backgroundColor #2B2B2B")
+        appendLine("skinparam DefaultFontColor #BBBBBB")
+        appendLine("skinparam ArrowColor #9C9C9C")
+        appendLine("skinparam ArrowFontColor #BBBBBB")
+        appendLine("skinparam state {")
+        appendLine("  BackgroundColor #3C3F41")
+        appendLine("  BorderColor #9C9C9C")
+        appendLine("  BorderThickness 1.5")
+        appendLine("  FontColor #DDDDDD")
+        appendLine("  StartColor #DDDDDD")
+        appendLine("  EndColor #DDDDDD")
+        appendLine("}")
+        appendLine("skinparam note {")
+        appendLine("  BackgroundColor #4C5052")
+        appendLine("  BorderColor #9C9C9C")
+        appendLine("  FontColor #BBBBBB")
+        appendLine("}")
     }
 
     private fun isUnnamed(rawName: String): Boolean {
