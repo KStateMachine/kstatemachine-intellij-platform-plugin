@@ -43,7 +43,7 @@ object PlantUmlGenerator {
         // The machine itself is a State — render it as a wrapping `state Name { … }`
         // block. Children are emitted recursively, including any nested machines
         // (which get the same wrap-in-named-block treatment).
-        appendStateDecl(machine, ids, unnamedIdx, parentAncestors = emptyList(), indent = 0)
+        appendStateDecl(machine, ids, unnamedIdx, syntax, parentAncestors = emptyList(), indent = 0)
 
         // Global transition pass — emits arrows for every state that's NOT
         // already had its transitions emitted inline by a parallel parent.
@@ -176,6 +176,7 @@ object PlantUmlGenerator {
         state: State,
         ids: Map<State, String>,
         unnamedIdx: java.util.IdentityHashMap<Any, Int>,
+        syntax: DiagramSyntax,
         parentAncestors: List<State>,
         indent: Int,
     ) {
@@ -205,14 +206,23 @@ object PlantUmlGenerator {
             val regionAncestors = listOf(state) + parentAncestors
             state.states.forEachIndexed { idx, child ->
                 if (idx > 0) appendLine("$pad  --")
-                appendStateDecl(child, ids, unnamedIdx, regionAncestors, indent + 1)
+                appendStateDecl(child, ids, unnamedIdx, syntax, regionAncestors, indent + 1)
                 emitSubtreeTransitions(child, regionAncestors, ids, unnamedIdx, indent + 1)
+                // Mermaid requires an explicit `[*] --> region` arrow inside
+                // each parallel region's slot — without it the renderer fails
+                // to draw the region. PlantUML doesn't tolerate this construct
+                // at the parallel-parent scope (each region's own initial is
+                // declared inside the region's own block), so we emit only
+                // for Mermaid output.
+                if (syntax == DiagramSyntax.MERMAID) {
+                    appendLine("$pad  [*] --> ${ids.getValue(child)}")
+                }
             }
             appendLine("$pad}")
         } else {
             appendLine("$pad$header {")
             val innerAncestors = listOf(state) + parentAncestors
-            state.states.forEach { appendStateDecl(it, ids, unnamedIdx, innerAncestors, indent + 1) }
+            state.states.forEach { appendStateDecl(it, ids, unnamedIdx, syntax, innerAncestors, indent + 1) }
             state.states.firstOrNull { it.kind.isInitial() }?.let {
                 appendLine("$pad  [*] --> ${ids[it]}")
             }
