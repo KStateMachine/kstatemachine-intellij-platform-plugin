@@ -33,4 +33,6 @@ open class State(
     val isParallel: Boolean = false,
     /** For `dataState<D>` and its initial/final/choice variants — the `D` type-arg text, e.g. `MyPayload`. */
     val dataType: String? = null,
+    /** For data states — raw expression text passed to the `defaultData` argument (`null` when absent). */
+    val defaultData: String? = null,
 )

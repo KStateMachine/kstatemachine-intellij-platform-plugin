@@ -25,6 +25,7 @@ private const val NAME_ARGUMENT = "name"
 private const val STATE_ARGUMENT = "state"
 private const val CHILD_MODE_ARGUMENT = "childMode"
 private const val HISTORY_TYPE_ARGUMENT = "historyType"
+private const val DEFAULT_DATA_ARGUMENT = "defaultData"
 private const val TARGET_STATE_PROPERTY = "targetState"
 private const val GUARD_PROPERTY = "guard"
 
@@ -124,6 +125,7 @@ class PsiElementsParser(private val output: Output) {
             // initialFinalDataState<D> / choiceDataState<D> /
             // initialChoiceDataState<D> — the D is the first (and only) type arg.
             dataType = if (kind.isData()) call.typeArguments.firstOrNull()?.text else null,
+            defaultData = if (kind.isData()) call.findDefaultData() else null,
         )
     }
 
@@ -275,6 +277,27 @@ private fun KtCallExpression.findLambdaAssignment(propertyName: String): String?
     }
     walk(body)
     return found
+}
+
+/**
+ * Extract the `defaultData` argument value from a data-state factory call.
+ * Accepts either form:
+ *   dataState<D>("name", defaultData = MyData(5))           // named
+ *   dataState<D>("name", MyData(5))                          // positional (slot 1)
+ *
+ * Positional slot 1 is correct for every data-state factory signature in the
+ * KStateMachine catalog — `name` is slot 0, `defaultData` is slot 1. The
+ * caller only invokes this when [StateKind.isData] is true, so we don't risk
+ * misreading a non-data-state call's slot-1 argument.
+ */
+private fun KtCallExpression.findDefaultData(): String? {
+    val args = valueArgumentList?.arguments.orEmpty()
+    args.firstOrNull { it.getArgumentName()?.asName?.asString() == DEFAULT_DATA_ARGUMENT }
+        ?.getArgumentExpression()?.text
+        ?.let { return it }
+    // Positional fallback: slot 1.
+    val positional = args.filter { it.getArgumentName() == null }
+    return positional.getOrNull(1)?.getArgumentExpression()?.text
 }
 
 /**

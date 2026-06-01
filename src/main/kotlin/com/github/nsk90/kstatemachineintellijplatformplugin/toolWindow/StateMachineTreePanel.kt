@@ -254,6 +254,7 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                 if (tag != null) append("  $tag", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.dataType != null) append("  <${data.dataType}>", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                if (data.defaultData != null) append("  defaultData = ${data.defaultData}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
             }
             is Transition -> {
                 icon = AllIcons.Actions.Forward
