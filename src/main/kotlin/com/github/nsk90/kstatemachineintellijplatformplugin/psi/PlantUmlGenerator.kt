@@ -29,32 +29,76 @@ object PlantUmlGenerator {
         appendLine("hide empty description")
         appendLine()
 
+        // Index unnamed states / transitions / nested machines per-machine,
+        // matching the tree's convention so labels like "State #2" reference
+        // the same node across both views.
+        val unnamedIdx = java.util.IdentityHashMap<Any, Int>()
+        indexMachineContent(machine, unnamedIdx)
+
         val ids = mutableMapOf<State, String>()
         assignIds(machine, ids, taken = mutableSetOf("start", "end"))
 
         // The machine itself is a State — render it as a wrapping `state Name { … }`
         // block. Children are emitted recursively, including any nested machines
         // (which get the same wrap-in-named-block treatment).
-        appendStateDecl(machine, ids, indent = 0)
+        appendStateDecl(machine, ids, unnamedIdx, indent = 0)
 
         // Transitions are collected from every level so arrows cross nesting boundaries.
         forEachStateWithAncestors(machine, ancestors = emptyList()) { source, ancestors ->
             source.transitions.forEach { t ->
-                appendTransition(source, t, ancestors, ids)
+                appendTransition(source, t, ancestors, ids, unnamedIdx)
             }
         }
 
         appendLine("@enduml")
     }
 
+    /** Walk a machine and assign 1-based indices to every unnamed node within it. */
+    private fun indexMachineContent(machine: StateMachine, out: java.util.IdentityHashMap<Any, Int>) {
+        var stateCounter = 0
+        var transitionCounter = 0
+        var nestedMachineCounter = 0
+        fun walk(node: State) {
+            for (child in node.states) {
+                if (child is StateMachine) {
+                    if (isUnnamed(child.name)) {
+                        nestedMachineCounter++
+                        out[child] = nestedMachineCounter
+                    }
+                    indexMachineContent(child, out)
+                } else {
+                    if (isUnnamed(child.name)) {
+                        stateCounter++
+                        out[child] = stateCounter
+                    }
+                    walk(child)
+                }
+            }
+            for (t in node.transitions) {
+                val raw = t.name
+                if (raw.isBlank() || raw == "null" || raw == "<unnamed>") {
+                    transitionCounter++
+                    out[t] = transitionCounter
+                }
+            }
+        }
+        walk(machine)
+    }
+
+    private fun isUnnamed(rawName: String): Boolean {
+        val unquoted = rawName.trim('"')
+        return unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>"
+    }
+
     private fun StringBuilder.appendStateDecl(
         state: State,
         ids: Map<State, String>,
+        unnamedIdx: java.util.IdentityHashMap<Any, Int>,
         indent: Int,
     ) {
         val pad = "  ".repeat(indent)
         val id = ids.getValue(state)
-        val displayName = state.displayName()
+        val displayName = state.displayName(unnamedIdx[state])
         val header = if (displayName == id) {
             "state $id"
         } else {
@@ -64,7 +108,7 @@ object PlantUmlGenerator {
             appendLine("$pad$header")
         } else {
             appendLine("$pad$header {")
-            state.states.forEach { appendStateDecl(it, ids, indent + 1) }
+            state.states.forEach { appendStateDecl(it, ids, unnamedIdx, indent + 1) }
             state.states.firstOrNull { it.kind.isInitial() }?.let {
                 appendLine("$pad  [*] --> ${ids[it]}")
             }
@@ -77,28 +121,29 @@ object PlantUmlGenerator {
         transition: Transition,
         ancestors: List<State>,
         ids: Map<State, String>,
+        unnamedIdx: java.util.IdentityHashMap<Any, Int>,
     ) {
         val sourceId = ids[source] ?: return
         val target = resolveTarget(transition.targetStateName, source, ancestors)
-        val label = transitionLabel(transition)
+        val label = transitionLabel(transition, unnamedIdx[transition])
         if (target != null) {
             val targetId = ids.getValue(target)
             appendLine("$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
         } else if (transition.targetStateName != null) {
             // Unresolved external/dynamic target — annotate so the user sees it.
-            appendLine("note right of $sourceId : ${escape(label.ifEmpty { transition.name })} → ${escape(transition.targetStateName)}")
+            appendLine("note right of $sourceId : ${escape(label.ifEmpty { "Transition" })} → ${escape(transition.targetStateName)}")
         } else if (label.isNotEmpty()) {
             // Internal / target-less transition.
             appendLine("note right of $sourceId : $label (internal)")
         }
     }
 
-    private fun transitionLabel(t: Transition): String {
+    private fun transitionLabel(t: Transition, index: Int?): String {
         val explicit = t.name.takeIf { it.isNotBlank() && it != "<unnamed>" && it != "null" }
         return when {
             explicit != null -> escape(explicit)
             t.eventType != null -> "on ${escape(t.eventType)}"
-            else -> ""
+            else -> if (index != null) "Transition #$index" else "Transition"
         }
     }
 
@@ -153,13 +198,15 @@ object PlantUmlGenerator {
     private fun escape(text: String): String =
         text.trim('"').replace("\"", "\\\"").replace("\n", " ")
 
-    // Friendly display name. Empty / "null" / "<unnamed>" become a type-tagged
-    // placeholder so the reader can tell what kind of node it is, instead of
-    // seeing a bare "<unnamed>".
-    private fun State.displayName(): String {
+    // Friendly display name. Empty / "null" / "<unnamed>" become the bare type
+    // word ("State" / "StateMachine") with an optional index — same convention
+    // the tree view uses, so a label like "State #2" identifies the same node
+    // in both views.
+    private fun State.displayName(index: Int?): String {
         val raw = name.trim('"')
         if (raw.isBlank() || raw == "null" || raw == "<unnamed>") {
-            return if (this is StateMachine) "Unnamed StateMachine" else "Unnamed State"
+            val typeLabel = if (this is StateMachine) "StateMachine" else "State"
+            return if (index != null) "$typeLabel #$index" else typeLabel
         }
         return raw
     }

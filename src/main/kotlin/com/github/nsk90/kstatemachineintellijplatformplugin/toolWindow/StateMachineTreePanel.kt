@@ -15,6 +15,7 @@ import com.intellij.ui.treeStructure.Tree
 import org.jetbrains.kotlin.psi.KtCallExpression
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.util.IdentityHashMap
 import javax.swing.JComponent
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
@@ -27,10 +28,11 @@ import javax.swing.tree.TreeSelectionModel
 class StateMachineTreePanel(private val project: Project) {
     private val rootNode = DefaultMutableTreeNode("State machines")
     private val treeModel = DefaultTreeModel(rootNode)
+    private val cellRenderer = StateMachineCellRenderer()
     private val tree = Tree(treeModel).apply {
         isRootVisible = false
         showsRootHandles = true
-        cellRenderer = StateMachineCellRenderer()
+        cellRenderer = this@StateMachineTreePanel.cellRenderer
         selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
     }
     private val scrollPane = JBScrollPane(tree)
@@ -135,6 +137,7 @@ class StateMachineTreePanel(private val project: Project) {
     }
 
     fun setMachines(machines: List<StateMachine>) {
+        cellRenderer.unnamedIndices = computeUnnamedIndices(machines)
         rootNode.removeAllChildren()
         machines.forEach { rootNode.add(buildNode(it)) }
         treeModel.reload()
@@ -207,6 +210,9 @@ private fun DefaultMutableTreeNode.pointer(): SmartPsiElementPointer<KtCallExpre
     }
 
 private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
+    /** Index assigned to each unnamed model node (per containing machine, 1-based). */
+    var unnamedIndices: Map<Any, Int> = emptyMap()
+
     override fun customizeCellRenderer(
         tree: JTree,
         value: Any?,
@@ -222,8 +228,9 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                 icon = AllIcons.Nodes.Class
                 val resolved = data.name.unquote()
                 if (resolved.isBlank() || resolved == "null" || resolved == "<unnamed>") {
-                    // Unnamed: show just "StateMachine" — don't duplicate the type word.
-                    append("StateMachine")
+                    // Unnamed machine — show just "StateMachine" plus an index
+                    // when there are multiple unnamed machines in the file.
+                    append(indexedTypeLabel("StateMachine", unnamedIndices[data]))
                 } else {
                     append("StateMachine ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                     append(resolved)
@@ -239,21 +246,19 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
             }
             is State -> {
                 icon = data.kind.icon()
-                append(displayName(data.name, "State"))
+                append(displayName(data.name, "State", unnamedIndices[data]))
                 val tag = data.kind.label()
                 if (tag != null) append("  $tag", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.dataType != null) append("  <${data.dataType}>", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                if (data.transitions.isNotEmpty()) {
-                    append("  (${data.transitions.size} transition${if (data.transitions.size == 1) "" else "s"})", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                }
             }
             is Transition -> {
                 icon = AllIcons.Actions.Forward
-                append(data.transitionLabel())
+                val label = data.transitionLabel(unnamedIndices[data])
+                append(label)
                 val suffix = buildString {
                     val typeArgs = data.typeArgsDisplay()
-                    if (typeArgs != null && !data.transitionLabel().contains(typeArgs)) {
+                    if (typeArgs != null && !label.contains(typeArgs)) {
                         append("  $typeArgs")
                     }
                     if (!data.targetStateName.isNullOrBlank()) {
@@ -273,18 +278,86 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
     }
 }
 
-private fun displayName(rawName: String, typeLabel: String): String {
+private fun displayName(rawName: String, typeLabel: String, index: Int?): String {
     val unquoted = rawName.unquote()
-    return if (unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>") typeLabel else unquoted
+    return if (unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>") {
+        indexedTypeLabel(typeLabel, index)
+    } else unquoted
 }
 
-private fun Transition.transitionLabel(): String {
+private fun Transition.transitionLabel(index: Int?): String {
     val unquoted = name.unquote()
     return when {
         unquoted.isNotBlank() && unquoted != "null" && unquoted != "<unnamed>" -> unquoted
         eventType != null -> "on $eventType"
-        else -> "Transition"
+        else -> indexedTypeLabel("Transition", index)
     }
+}
+
+private fun indexedTypeLabel(typeLabel: String, index: Int?): String =
+    if (index != null) "$typeLabel #$index" else typeLabel
+
+/** Same definition shared with [PlantUmlGenerator]. */
+private fun isUnnamed(rawName: String): Boolean {
+    val unquoted = rawName.unquote()
+    return unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>"
+}
+
+/**
+ * Walk every machine and assign a 1-based index to each unnamed model node
+ * within that machine. Indices are per-machine (so two unnamed states in
+ * different machines can both be `#1` — the user disambiguates by which
+ * machine subtree they belong to). Top-level unnamed machines are indexed
+ * globally across the file.
+ *
+ * Identity-based lookup (`IdentityHashMap`) so two structurally-equal model
+ * objects don't collapse to the same entry.
+ */
+private fun computeUnnamedIndices(machines: List<StateMachine>): Map<Any, Int> {
+    val result = IdentityHashMap<Any, Int>()
+
+    var topMachineCounter = 0
+    machines.forEach { m ->
+        if (isUnnamed(m.name)) {
+            topMachineCounter++
+            result[m] = topMachineCounter
+        }
+        indexMachineContent(m, result)
+    }
+    return result
+}
+
+private fun indexMachineContent(machine: StateMachine, out: IdentityHashMap<Any, Int>) {
+    var stateCounter = 0
+    var transitionCounter = 0
+    var nestedMachineCounter = 0
+
+    fun walk(node: State) {
+        for (child in node.states) {
+            if (child is StateMachine) {
+                if (isUnnamed(child.name)) {
+                    nestedMachineCounter++
+                    out[child] = nestedMachineCounter
+                }
+                // Nested machines get their own scope — recurse separately.
+                indexMachineContent(child, out)
+            } else {
+                if (isUnnamed(child.name)) {
+                    stateCounter++
+                    out[child] = stateCounter
+                }
+                walk(child)
+            }
+        }
+        for (t in node.transitions) {
+            val tname = t.name
+            if (tname.isBlank() || tname == "null" || tname == "<unnamed>") {
+                transitionCounter++
+                out[t] = transitionCounter
+            }
+        }
+    }
+    walk(machine)
 }
 
 // `<EventType>` or `<EventType, DataType>` for data transitions. Returns null
@@ -296,8 +369,7 @@ private fun Transition.typeArgsDisplay(): String? {
 }
 
 // Categorical tags shown after a transition. A single transition may carry
-// several (e.g. a `dataTransitionOn` with a guard and no resolvable target →
-// `[data, dynamic, guarded, targetless]`).
+// several (e.g. a `dataTransitionOn` with a guard → `[data, dynamic, guarded]`).
 //
 // `choice` is NOT a transition tag — it belongs to `choiceState` factory calls
 // and is rendered as the state's kind label (`(choice)`).
@@ -312,7 +384,14 @@ private fun Transition.transitionTags(): List<String> = buildList {
         }
     }
     if (isGuarded) add("guarded")
-    if (targetStateName.isNullOrBlank()) add("targetless")
+    // `targetless` only applies to the forms that take an explicit `targetState`
+    // argument and can omit it (then the transition is internal). The other
+    // forms route their target through a lambda (`transitionOn`'s `targetState = { … }`,
+    // `transitionConditionally`'s `direction = { … }`) — a missing
+    // `targetStateName` on those means the parser couldn't statically resolve
+    // a lambda body, NOT that the transition is targetless.
+    val supportsTargetlessSemantics = callee == null || callee == "transition" || callee == "dataTransition"
+    if (supportsTargetlessSemantics && targetStateName.isNullOrBlank()) add("targetless")
 }
 
 // Argument values come from the PSI as raw expression text — string literals
