@@ -43,14 +43,34 @@ object PlantUmlGenerator {
         // (which get the same wrap-in-named-block treatment).
         appendStateDecl(machine, ids, unnamedIdx, indent = 0)
 
-        // Transitions are collected from every level so arrows cross nesting boundaries.
+        // Transitions are collected from every level so arrows cross nesting
+        // boundaries. Choice states also emit an outgoing arrow to their
+        // resolved redirect target when one is available.
         forEachStateWithAncestors(machine, ancestors = emptyList()) { source, ancestors ->
             source.transitions.forEach { t ->
                 appendTransition(source, t, ancestors, ids, unnamedIdx)
             }
+            if (source.kind.isChoice() && source.redirectTarget != null) {
+                appendChoiceRedirect(source, ancestors, ids)
+            }
         }
 
         appendLine("@enduml")
+    }
+
+    private fun StringBuilder.appendChoiceRedirect(
+        source: State,
+        ancestors: List<State>,
+        ids: Map<State, String>,
+    ) {
+        val sourceId = ids[source] ?: return
+        val target = resolveTarget(source.redirectTarget, source, ancestors)
+        if (target != null) {
+            appendLine("$sourceId --> ${ids.getValue(target)}")
+        } else {
+            // Unresolvable / external target — leave a hint instead of dropping it.
+            appendLine("note right of $sourceId : → ${escape(source.redirectTarget!!)}")
+        }
     }
 
     /** Walk a machine and assign 1-based indices to every unnamed node within it. */
@@ -99,10 +119,14 @@ object PlantUmlGenerator {
         val pad = "  ".repeat(indent)
         val id = ids.getValue(state)
         val displayName = state.displayName(unnamedIdx[state])
+        // PlantUML state-stereotype suffix — `<<choice>>` renders the state as
+        // a conditional decision diamond, per
+        // https://plantuml.com/state-diagram#1f8b7d76aeff5c0a .
+        val stereotype = if (state.kind.isChoice()) " <<choice>>" else ""
         val header = if (displayName == id) {
-            "state $id"
+            "state $id$stereotype"
         } else {
-            "state \"${escape(displayName)}\" as $id"
+            "state \"${escape(displayName)}\" as $id$stereotype"
         }
         if (state.states.isEmpty()) {
             appendLine("$pad$header")
@@ -219,6 +243,14 @@ object PlantUmlGenerator {
         action(state, ancestors)
         val newAncestors = listOf(state) + ancestors
         state.states.forEach { forEachStateWithAncestors(it, newAncestors, action) }
+    }
+
+    private fun StateKind.isChoice(): Boolean = when (this) {
+        StateKind.CHOICE,
+        StateKind.INITIAL_CHOICE,
+        StateKind.CHOICE_DATA,
+        StateKind.INITIAL_CHOICE_DATA -> true
+        else -> false
     }
 
     private fun StateKind.isInitial(): Boolean = when (this) {
