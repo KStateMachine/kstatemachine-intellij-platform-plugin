@@ -148,7 +148,16 @@ class PsiElementsParser(private val output: Output) {
     // builds a StateMachine (a State subclass) from the call's lambda. Used for
     // top-level machines AND nested machines (substates of another machine).
     private fun parseMachine(call: KtCallExpression, pointerManager: SmartPointerManager): StateMachine {
-        val name = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
+        // Machine factories — createStateMachine, createStateMachineBlocking,
+        // createStdLibStateMachine, createTestStateMachine — all take the
+        // CoroutineScope (or equivalent receiver/argument) as the FIRST
+        // positional argument and `name` as the SECOND. We can't use the
+        // generic "first positional" fallback here because that would pick up
+        // the scope. Instead use a name-resolution path that requires either
+        // a named `name = …` arg or a string-literal positional anywhere
+        // (which finds "Hero" in `createStateMachine(scope, "Hero", …)`
+        // without confusing it for the scope).
+        val name = findMachineName(call) ?: "<unnamed>"
         val (states, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
         return StateMachine(
             name = name,
@@ -388,6 +397,32 @@ private fun findArgumentValueWithDefaults(
 private fun KtExpression.simplifiedStateName(): String = when (this) {
     is KtCallExpression -> calleeExpression?.text ?: text
     else -> text
+}
+
+/**
+ * Extract the `name` argument from a machine-creation call. Unlike the
+ * general-purpose [findArgumentValueWithDefaults] this DOES NOT fall back to
+ * the first positional argument — that slot is the scope (CoroutineScope or
+ * similar receiver), never the name.
+ */
+private fun findMachineName(call: KtCallExpression): String? {
+    val args = call.valueArgumentList?.arguments.orEmpty()
+
+    // (1) Explicit `name = …` named argument.
+    args.firstOrNull { it.getArgumentName()?.asName?.asString() == NAME_ARGUMENT }
+        ?.getArgumentExpression()
+        ?.resolveAsLiteral()
+        ?.let { return it }
+
+    // (2) First positional arg that resolves to a string literal — directly
+    // or via a same-file constant. This is what makes
+    // `createStateMachineBlocking(scope, "Hero", …)` work: "Hero" is the only
+    // string-literal positional, so it wins.
+    args.firstOrNull { arg ->
+        arg.getArgumentName() == null && arg.getArgumentExpression()?.resolvesToStringLiteral() == true
+    }?.getArgumentExpression()?.resolveAsLiteral()?.let { return it }
+
+    return null
 }
 
 /**

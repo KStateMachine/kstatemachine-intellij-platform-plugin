@@ -181,7 +181,10 @@ class StateMachineTreePanel(private val project: Project) {
     private fun navigateToPointer(pointer: SmartPsiElementPointer<KtCallExpression>) {
         val element = pointer.element ?: return
         val vf = pointer.virtualFile ?: return
-        OpenFileDescriptor(project, vf, element.textRange.startOffset).navigate(true)
+        // requestFocus = false → the editor opens / scrolls to the location, but
+        // keyboard focus stays in the tree so arrow-key navigation through the
+        // tree keeps working without the editor stealing it on every selection.
+        OpenFileDescriptor(project, vf, element.textRange.startOffset).navigate(false)
     }
 
     private fun findSmallestContaining(
@@ -225,7 +228,7 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
         val node = value as? DefaultMutableTreeNode ?: return
         when (val data = node.userObject) {
             is StateMachine -> {
-                icon = AllIcons.Nodes.Class
+                icon = AllIcons.Nodes.Module
                 val resolved = data.name.unquote()
                 if (resolved.isBlank() || resolved == "null" || resolved == "<unnamed>") {
                     // Unnamed machine — show just "StateMachine" plus an index
@@ -421,7 +424,7 @@ private fun StateKind.icon() = when (this) {
     StateKind.CHOICE, StateKind.CHOICE_DATA -> AllIcons.Vcs.Branch
     StateKind.INITIAL_CHOICE, StateKind.INITIAL_CHOICE_DATA -> AllIcons.Vcs.Branch
     StateKind.HISTORY, StateKind.HISTORY_DEEP -> AllIcons.Vcs.History
-    StateKind.STATE, StateKind.DATA, StateKind.MUTABLE_DATA -> AllIcons.Nodes.ModelClass
+    StateKind.STATE, StateKind.DATA, StateKind.MUTABLE_DATA -> AllIcons.Nodes.Class
 }
 
 private fun StateKind.label(): String? = when (this) {

@@ -13,9 +13,9 @@ import javax.swing.Icon
 internal object KStateMachineCalls {
 
     enum class Kind(val icon: Icon, val tooltip: String) {
-        MACHINE(AllIcons.Nodes.Class, "KStateMachine: createStateMachine"),
-        STATE(AllIcons.Nodes.ModelClass, "KStateMachine: state"),
-        ADD_STATE(AllIcons.Nodes.ModelClass, "KStateMachine: addState"),
+        MACHINE(AllIcons.Nodes.Module, "KStateMachine: createStateMachine"),
+        STATE(AllIcons.Nodes.Class, "KStateMachine: state"),
+        ADD_STATE(AllIcons.Nodes.Class, "KStateMachine: addState"),
         TRANSITION(AllIcons.Actions.Forward, "KStateMachine: transition"),
     }
 
