@@ -136,6 +136,12 @@ object PlantUmlGenerator {
             state.states.firstOrNull { it.kind.isInitial() }?.let {
                 appendLine("$pad  [*] --> ${ids[it]}")
             }
+            // Final child → [*] arrow per PlantUML's terminal-state convention.
+            // INITIAL_FINAL states correctly get both arrows ([*]→X and X→[*])
+            // — they're entered first and also end the containing scope.
+            state.states.filter { it.kind.isFinal() }.forEach { finalChild ->
+                appendLine("$pad  ${ids[finalChild]} --> [*]")
+            }
             appendLine("$pad}")
         }
     }
@@ -262,6 +268,16 @@ object PlantUmlGenerator {
         StateKind.INITIAL_FINAL_MUTABLE_DATA,
         StateKind.INITIAL_CHOICE,
         StateKind.INITIAL_CHOICE_DATA -> true
+        else -> false
+    }
+
+    private fun StateKind.isFinal(): Boolean = when (this) {
+        StateKind.FINAL,
+        StateKind.INITIAL_FINAL,
+        StateKind.FINAL_DATA,
+        StateKind.INITIAL_FINAL_DATA,
+        StateKind.FINAL_MUTABLE_DATA,
+        StateKind.INITIAL_FINAL_MUTABLE_DATA -> true
         else -> false
     }
 }
