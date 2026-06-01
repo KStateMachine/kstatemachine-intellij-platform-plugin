@@ -102,12 +102,8 @@ object PlantUmlGenerator {
         val pad = "  ".repeat(indent)
         val sourceId = ids[source] ?: return
         val target = resolveTarget(source.redirectTarget, source, ancestors)
-        if (target != null) {
-            appendLine("$pad$sourceId --> ${ids.getValue(target)}")
-        } else {
-            // Unresolvable / external target — leave a hint instead of dropping it.
-            appendLine("${pad}note right of $sourceId : → ${escape(source.redirectTarget!!)}")
-        }
+        val targetText = if (target != null) ids.getValue(target) else sanitizeId(source.redirectTarget!!)
+        appendLine("$pad$sourceId --> $targetText")
     }
 
     /** Walk a machine and assign 1-based indices to every unnamed node within it. */
@@ -261,15 +257,18 @@ object PlantUmlGenerator {
         val sourceId = ids[source] ?: return
         val target = resolveTarget(transition.targetStateName, source, ancestors)
         val label = transitionLabel(transition, unnamedIdx[transition])
-        if (target != null) {
-            val targetId = ids.getValue(target)
-            appendLine("$pad$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
-        } else if (transition.targetStateName != null) {
-            appendLine("${pad}note right of $sourceId : ${escape(label.ifEmpty { "Transition" })} → ${escape(transition.targetStateName)}")
-        } else {
-            // Targetless / internal — self-loop on the source.
-            appendLine("$pad$sourceId --> $sourceId${if (label.isEmpty()) "" else " : $label"}")
+        // Always emit a real transition arrow — no more `note right of …`
+        // fallbacks. PlantUML / Mermaid accept arrows to identifiers they
+        // haven't seen declared (they show up as implicit nodes), so even
+        // an unresolved target like `{ if (…) A else B }` gets rendered as
+        // a transition to a sanitized synthetic node rather than vanishing
+        // into a side-note. Targetless / internal stays a self-loop.
+        val targetId = when {
+            target != null -> ids.getValue(target)
+            transition.targetStateName != null -> sanitizeId(transition.targetStateName)
+            else -> sourceId   // self-loop for internal
         }
+        appendLine("$pad$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
     }
 
     private fun transitionLabel(t: Transition, index: Int?): String {
