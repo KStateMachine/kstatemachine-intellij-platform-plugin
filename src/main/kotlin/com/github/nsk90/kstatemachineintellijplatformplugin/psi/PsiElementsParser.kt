@@ -9,6 +9,7 @@ import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtBlockExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
@@ -429,6 +430,8 @@ private fun findMachineName(call: KtCallExpression): String? {
  * Returns the expression's text, resolving same-file string constants when
  * possible. Handles:
  *   - String literals: returned as-is (with surrounding quotes preserved).
+ *   - Local val/var: `val name = "red"` then `state(name)` in the same block
+ *     resolves to "\"red\"". The closest enclosing scope wins (shadowing).
  *   - Top-level constants: `const val RED = "red"` → `state(RED)` resolves to "\"red\"".
  *   - Object members: `object Names { const val RED = "red" }` → `state(Names.RED)`.
  *   - Class companions: `class Names { companion object { const val RED = "red" } }`
@@ -442,8 +445,10 @@ private fun KtExpression.resolveAsLiteral(): String {
     if (this is KtStringTemplateExpression) return text
     val file = containingKtFile
     when (this) {
-        is KtNameReferenceExpression ->
+        is KtNameReferenceExpression -> {
+            findLocalStringConstant()?.let { return it }
             file.findTopLevelStringConstant(text)?.let { return it }
+        }
         is KtDotQualifiedExpression -> {
             val receiver = receiverExpression as? KtNameReferenceExpression
             val selector = selectorExpression as? KtNameReferenceExpression
@@ -460,7 +465,9 @@ private fun KtExpression.resolvesToStringLiteral(): Boolean {
     if (this is KtStringTemplateExpression) return true
     val file = containingKtFile
     return when (this) {
-        is KtNameReferenceExpression -> file.findTopLevelStringConstant(text) != null
+        is KtNameReferenceExpression -> {
+            findLocalStringConstant() != null || file.findTopLevelStringConstant(text) != null
+        }
         is KtDotQualifiedExpression -> {
             val receiver = receiverExpression as? KtNameReferenceExpression ?: return false
             val selector = selectorExpression as? KtNameReferenceExpression ?: return false
@@ -468,6 +475,33 @@ private fun KtExpression.resolvesToStringLiteral(): Boolean {
         }
         else -> false
     }
+}
+
+/**
+ * Walks up the PSI from a name reference looking for an enclosing `KtBlockExpression`
+ * (function body, lambda body, init block, etc.) that declares a `val name = "literal"`
+ * (or `var`) matching this reference. Closest scope wins — that's standard Kotlin
+ * lexical scoping with shadowing.
+ *
+ * Returns the literal's raw text (still quoted), or null if no scope has a matching
+ * declaration with a string-literal initializer.
+ */
+private fun KtNameReferenceExpression.findLocalStringConstant(): String? {
+    val targetName = text
+    var element: PsiElement? = parent
+    while (element != null) {
+        if (element is KtBlockExpression) {
+            for (stmt in element.statements) {
+                if (stmt !is KtProperty || stmt.name != targetName) continue
+                // Closest matching declaration wins — even if its initializer
+                // isn't a string literal, anything in an outer scope is shadowed
+                // and shouldn't be consulted.
+                return (stmt.initializer as? KtStringTemplateExpression)?.text
+            }
+        }
+        element = element.parent
+    }
+    return null
 }
 
 private fun KtFile.findTopLevelStringConstant(name: String): String? {
