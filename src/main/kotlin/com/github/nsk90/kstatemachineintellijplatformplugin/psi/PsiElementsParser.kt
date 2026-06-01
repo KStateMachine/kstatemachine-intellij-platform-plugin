@@ -395,9 +395,49 @@ private fun findArgumentValueWithDefaults(
 // Constructor-call args like `AirAttacking()` reduce to their callee text
 // "AirAttacking", which renders much more cleanly in the tree / diagram than
 // the raw expression with its empty parens.
-private fun KtExpression.simplifiedStateName(): String = when (this) {
-    is KtCallExpression -> calleeExpression?.text ?: text
-    else -> text
+//
+// Name references like `addInitialState(state)` where `state` is a local
+// val/var bound to a constructor call are recursively resolved — the val's
+// initializer is fed back through simplifiedStateName, so
+//   val state = DefaultState()
+//   addInitialState(state)   →   "DefaultState"
+// Capped at a small recursion depth to defend against pathological val chains.
+private fun KtExpression.simplifiedStateName(depth: Int = 0): String {
+    if (depth > 5) return text
+    return when (this) {
+        is KtCallExpression -> calleeExpression?.text ?: text
+        is KtNameReferenceExpression ->
+            resolveLocalInitializer()?.simplifiedStateName(depth + 1) ?: text
+        else -> text
+    }
+}
+
+/**
+ * Walk up the PSI looking for an enclosing block (or the file itself) that
+ * declares `val <this.text> = …`. Returns the initializer expression, or null
+ * if no matching declaration exists.
+ *
+ * Differs from [findLocalStringConstant] — that one only returns string
+ * literals; this one returns ANY initializer expression so the caller (e.g.
+ * [simplifiedStateName]) can decide what to do with it.
+ */
+private fun KtNameReferenceExpression.resolveLocalInitializer(): KtExpression? {
+    val targetName = text
+    var element: PsiElement? = parent
+    while (element != null) {
+        if (element is KtBlockExpression) {
+            for (stmt in element.statements) {
+                if (stmt is KtProperty && stmt.name == targetName) {
+                    return stmt.initializer
+                }
+            }
+        }
+        element = element.parent
+    }
+    // Fall back to top-level file properties.
+    return containingKtFile.declarations.filterIsInstance<KtProperty>()
+        .firstOrNull { it.name == targetName }
+        ?.initializer
 }
 
 /**
