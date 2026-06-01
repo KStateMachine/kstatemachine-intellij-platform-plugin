@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.psi.KtBinaryExpression
 import org.jetbrains.kotlin.psi.KtBlockExpression
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassBody
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtFile
@@ -241,16 +242,84 @@ private fun KtCallExpression.kindFromCallee(): StateKind = when (calleeExpressio
 // supports two forms:
 //   transition<E>("name", targetState = Jumping)      // value argument
 //   transition<E>("name") { targetState = X }          // lambda body assignment
-// Returns the raw text of the target (e.g. "Jumping" or "{ X }" for the
-// transitionOn lambda form). null if not set.
+//   transitionOn<E>("name") { targetState = { X } }    // transitionOn lambda
+//
+// Returns the state's logical NAME when the right-hand side resolves to a
+// state factory call (directly or via local val / file-level constant chain).
+// Falls back to the raw expression text when nothing resolves. So
+//   val checkpoint = initialState("Save Point")
+//   transition<E>(targetState = checkpoint)            →  "\"Save Point\""
+// matches the same state node the tree shows for that initialState call.
 private fun KtCallExpression.findTargetStateName(): String? {
     // (1) Named value argument: `transition<E>(targetState = Foo)`
-    valueArgumentList?.arguments
+    val valueArgExpr = valueArgumentList?.arguments
         ?.firstOrNull { it.getArgumentName()?.asName?.asString() == TARGET_STATE_PROPERTY }
-        ?.getArgumentExpression()?.text
-        ?.let { return it }
-    // (2) Assignment inside the lambda body: `transition<E> { targetState = Foo }`
-    return findLambdaAssignment(TARGET_STATE_PROPERTY)
+        ?.getArgumentExpression()
+    if (valueArgExpr != null) {
+        return resolveStateNameFromExpr(valueArgExpr) ?: valueArgExpr.text
+    }
+    // (2) Assignment inside the lambda body. Pull the raw RHS expression first
+    // — for transitionOn's `targetState = { … }` we peek inside the lambda
+    // when it holds a single identifier expression we can chase.
+    val body = dslLambda()?.bodyExpression ?: return null
+    var rhsExpr: KtExpression? = null
+    fun walk(element: PsiElement) {
+        if (rhsExpr != null) return
+        for (child in element.children) {
+            if (child is KtLambdaExpression) continue
+            if (child is KtBinaryExpression
+                && child.operationToken == KtTokens.EQ
+                && child.left?.text == TARGET_STATE_PROPERTY
+            ) {
+                rhsExpr = child.right
+                return
+            }
+            walk(child)
+        }
+    }
+    walk(body)
+    val rhs = rhsExpr ?: return null
+
+    if (rhs is KtLambdaExpression) {
+        // transitionOn-style `{ someState }`. If the lambda body is a single
+        // expression we can resolve, use the resolved name. Otherwise keep the
+        // raw lambda text so the tree renderer still shows the user something.
+        rhs.bodyExpression?.statements?.singleOrNull()
+            ?.let { single -> resolveStateNameFromExpr(single) }
+            ?.let { return it }
+        return rhs.text
+    }
+    return resolveStateNameFromExpr(rhs) ?: rhs.text
+}
+
+/**
+ * Follow [expr] back to the underlying KStateMachine state-factory call (if any)
+ * and return that call's name argument. Handles three shapes:
+ *
+ *   - String literal: returns the literal text directly.
+ *   - Direct factory call (`state("X")` / `addState(MyState())` / `createStateMachine(…, "Y")`):
+ *     returns the name extracted from the call's arguments.
+ *   - Identifier (`KtNameReferenceExpression`): walks back to its `val`/`var`
+ *     declaration and recurses on the initializer, so chains like
+ *     `val a = state("X"); val b = a; targetState = b` still resolve to `"X"`.
+ *
+ * Capped recursion depth as a safety belt; null when nothing resolves.
+ */
+private fun resolveStateNameFromExpr(expr: KtExpression?, depth: Int = 0): String? {
+    if (expr == null || depth > 5) return null
+    return when (expr) {
+        is KtStringTemplateExpression -> expr.text
+        is KtCallExpression -> when (KStateMachineCalls.matchKind(expr)) {
+            KStateMachineCalls.Kind.STATE, KStateMachineCalls.Kind.MACHINE ->
+                findArgumentValueWithDefaults(expr, NAME_ARGUMENT)
+            KStateMachineCalls.Kind.ADD_STATE ->
+                findArgumentValueWithDefaults(expr, STATE_ARGUMENT)
+            else -> null
+        }
+        is KtNameReferenceExpression ->
+            resolveStateNameFromExpr(expr.resolveLocalInitializer(), depth + 1)
+        else -> null
+    }
 }
 
 /**
@@ -436,24 +505,49 @@ private fun KtExpression.simplifiedStateName(depth: Int = 0): String {
 }
 
 /**
- * Walk up the PSI looking for an enclosing block (or the file itself) that
- * declares `val <this.text> = …`. Returns the initializer expression, or null
- * if no matching declaration exists.
+ * Walk up the PSI looking for the binding of [this] reference. Returns the
+ * expression that the name currently refers to, or null if nothing resolves.
+ *
+ * Looks at, in lexical-scope order:
+ *   - `KtBlockExpression` statements: `val/var <name> = expr` declarations,
+ *     **and** plain assignments `<name> = expr` (covers the common KSM test
+ *     pattern of `private var state1: State? = null` at class level then
+ *     `state1 = initialState("…")` inside a `createStateMachine { … }` lambda,
+ *     where the declaration's null initializer isn't useful).
+ *   - `KtClassBody` declarations: member properties of the enclosing class.
+ *   - Top-level file properties.
+ *
+ * The *latest* matching binding within each scope wins, so a re-assignment
+ * after an earlier declaration is reflected.
  *
  * Differs from [findLocalStringConstant] — that one only returns string
  * literals; this one returns ANY initializer expression so the caller (e.g.
- * [simplifiedStateName]) can decide what to do with it.
+ * [simplifiedStateName], [resolveStateNameFromExpr]) can decide what to do
+ * with it.
  */
 private fun KtNameReferenceExpression.resolveLocalInitializer(): KtExpression? {
     val targetName = text
     var element: PsiElement? = parent
     while (element != null) {
         if (element is KtBlockExpression) {
+            var lastMatch: KtExpression? = null
             for (stmt in element.statements) {
-                if (stmt is KtProperty && stmt.name == targetName) {
-                    return stmt.initializer
+                when {
+                    stmt is KtProperty && stmt.name == targetName ->
+                        stmt.initializer?.let { lastMatch = it }
+                    stmt is KtBinaryExpression
+                        && stmt.operationToken == KtTokens.EQ
+                        && (stmt.left as? KtNameReferenceExpression)?.text == targetName ->
+                        stmt.right?.let { lastMatch = it }
                 }
             }
+            if (lastMatch != null) return lastMatch
+        } else if (element is KtClassBody) {
+            element.declarations
+                .filterIsInstance<KtProperty>()
+                .firstOrNull { it.name == targetName }
+                ?.initializer
+                ?.let { return it }
         }
         element = element.parent
     }
