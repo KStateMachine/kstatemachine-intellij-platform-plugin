@@ -72,9 +72,14 @@ class StateMachineTreePanel(private val project: Project) {
     private fun maybeShowTransitionPopup(e: MouseEvent) {
         val path = tree.getPathForLocation(e.x, e.y) ?: return
         val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
+        // Scope the search to the right-clicked node's enclosing state machine
+        // — when there are multiple machines in the file they often share state
+        // names, and a tree-wide search would jump to the first match in some
+        // unrelated machine.
+        val searchRoot = node.enclosingMachineNode() ?: rootNode
         val targetNode = when (val data = node.userObject) {
-            is Transition -> findTargetStateNode(data)
-            is State -> findChoiceTargetNode(data)
+            is Transition -> findTargetStateNode(data, searchRoot)
+            is State -> findChoiceTargetNode(data, searchRoot)
             else -> null
         } ?: return
 
@@ -95,14 +100,20 @@ class StateMachineTreePanel(private val project: Project) {
         }.show(tree, e.x, e.y)
     }
 
-    private fun findChoiceTargetNode(state: State): DefaultMutableTreeNode? {
+    private fun findChoiceTargetNode(
+        state: State,
+        searchRoot: DefaultMutableTreeNode,
+    ): DefaultMutableTreeNode? {
         val raw = state.redirectTarget?.trim() ?: return null
         val target = raw.removeSurrounding("\"").trim()
         if (target.isEmpty()) return null
-        return findStateNodeByName(rootNode, target)
+        return findStateNodeByName(searchRoot, target)
     }
 
-    private fun findTargetStateNode(transition: Transition): DefaultMutableTreeNode? {
+    private fun findTargetStateNode(
+        transition: Transition,
+        searchRoot: DefaultMutableTreeNode,
+    ): DefaultMutableTreeNode? {
         val raw = transition.targetStateName?.trim() ?: return null
         val target = when {
             // transitionOn lambda — `targetState = { someState }`. If the lambda
@@ -124,7 +135,7 @@ class StateMachineTreePanel(private val project: Project) {
             else -> raw.removeSurrounding("\"").trim()
         }
         if (target.isEmpty()) return null
-        return findStateNodeByName(rootNode, target)
+        return findStateNodeByName(searchRoot, target)
     }
 
     private fun findStateNodeByName(node: DefaultMutableTreeNode, name: String): DefaultMutableTreeNode? {
@@ -135,6 +146,21 @@ class StateMachineTreePanel(private val project: Project) {
         for (i in 0 until node.childCount) {
             val child = node.getChildAt(i) as DefaultMutableTreeNode
             findStateNodeByName(child, name)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Walk up the tree from [this] looking for the closest ancestor (or self)
+     * whose user object is a [StateMachine]. Used to scope target-state
+     * resolution to the right machine when several sibling machines in the
+     * same file share state names.
+     */
+    private fun DefaultMutableTreeNode.enclosingMachineNode(): DefaultMutableTreeNode? {
+        var current: DefaultMutableTreeNode? = this
+        while (current != null) {
+            if (current.userObject is StateMachine) return current
+            current = current.parent as? DefaultMutableTreeNode
         }
         return null
     }
