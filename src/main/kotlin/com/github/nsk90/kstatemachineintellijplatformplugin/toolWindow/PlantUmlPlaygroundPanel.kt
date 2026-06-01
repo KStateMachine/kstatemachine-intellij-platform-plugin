@@ -1,8 +1,10 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow
 
+import com.github.nsk90.kstatemachineintellijplatformplugin.psi.PlantUmlGenerator
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.ui.IdeBorderFactory
+import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -46,7 +48,7 @@ class PlantUmlPlaygroundPanel {
         lineWrap = false
         font = Font(Font.MONOSPACED, Font.PLAIN, 12)
         border = IdeBorderFactory.createTitledBorder("PlantUML input (edit to re-render)", false)
-        text = SAMPLE
+        text = buildSampleTemplate()
     }
     private val sourceScroll = JBScrollPane(sourceArea)
 
@@ -99,20 +101,32 @@ class PlantUmlPlaygroundPanel {
         imageContainer.repaint()
     }
 
+    /**
+     * Initial sample shown when the Playground first opens. Includes the same
+     * dark-theme skinparam block the Diagram tab uses (via
+     * [PlantUmlGenerator.darkThemeSkinparams]) when the IDE is in a dark
+     * theme, so the demo renders in the right palette out of the box. Once
+     * the user starts editing, their content is preserved as-is — we don't
+     * re-inject anything.
+     */
+    private fun buildSampleTemplate(): String = buildString {
+        appendLine("@startuml")
+        appendLine("!pragma layout smetana")
+        appendLine("top to bottom direction")
+        if (!JBColor.isBright()) {
+            appendLine(PlantUmlGenerator.darkThemeSkinparams())
+        }
+        appendLine()
+        appendLine("state TrafficLight {")
+        appendLine("    [*] --> Red")
+        appendLine("    Red --> Yellow : tick")
+        appendLine("    Yellow --> Green : tick")
+        appendLine("    Green --> Red : tick")
+        appendLine("}")
+        appendLine("@enduml")
+    }
+
     companion object {
         private const val DEBOUNCE_MS = 500
-        private val SAMPLE = """
-            @startuml
-            !pragma layout smetana
-            top to bottom direction
-
-            state TrafficLight {
-                [*] --> Red
-                Red --> Yellow : tick
-                Yellow --> Green : tick
-                Green --> Red : tick
-            }
-            @enduml
-        """.trimIndent()
     }
 }

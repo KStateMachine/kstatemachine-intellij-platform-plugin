@@ -111,8 +111,12 @@ object PlantUmlGenerator {
      * rendered PNG doesn't look out of place when embedded in the dark IDE.
      * Embedded in the source string itself — so a theme change naturally
      * busts the render cache (different source → cache miss → re-render).
+     *
+     * Public so other panels (Playground) can reuse the same block when
+     * constructing their initial template — keeping a single source of truth
+     * for the dark-theme styling.
      */
-    private fun StringBuilder.appendDarkSkinparams() {
+    fun darkThemeSkinparams(): String = buildString {
         appendLine("skinparam backgroundColor #2B2B2B")
         appendLine("skinparam DefaultFontColor #BBBBBB")
         appendLine("skinparam ArrowColor #9C9C9C")
@@ -130,6 +134,10 @@ object PlantUmlGenerator {
         appendLine("  BorderColor #9C9C9C")
         appendLine("  FontColor #BBBBBB")
         appendLine("}")
+    }.trimEnd()
+
+    private fun StringBuilder.appendDarkSkinparams() {
+        appendLine(darkThemeSkinparams())
     }
 
     private fun isUnnamed(rawName: String): Boolean {
@@ -157,6 +165,22 @@ object PlantUmlGenerator {
         }
         if (state.states.isEmpty()) {
             appendLine("$pad$header")
+        } else if (state.isParallel) {
+            // Parallel/orthogonal region — each direct child is its own
+            // independent region, all active simultaneously. PlantUML's
+            // separator for concurrent regions is `--` placed *between*
+            // children inside the wrapping `state X { … }` block.
+            //
+            // Initial / final arrows are *per region* (inside each child),
+            // not at this level — they're emitted naturally by the recursive
+            // `appendStateDecl` for each child, since each region has its own
+            // initial substate.
+            appendLine("$pad$header {")
+            state.states.forEachIndexed { idx, child ->
+                if (idx > 0) appendLine("$pad  --")
+                appendStateDecl(child, ids, unnamedIdx, indent + 1)
+            }
+            appendLine("$pad}")
         } else {
             appendLine("$pad$header {")
             state.states.forEach { appendStateDecl(it, ids, unnamedIdx, indent + 1) }

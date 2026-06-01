@@ -12,7 +12,8 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow factoryClass="com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.MainToolWindowFactory"
-                    id="KStateMachine"/>
+                    id="KStateMachine"
+                    key="toolwindow.stripe.KStateMachine"/>
         <codeInsight.lineMarkerProvider language="kotlin"
                                         implementationClass="com.github.nsk90.kstatemachineintellijplatformplugin.psi.StateMachineLineMarkerProvider"/>
     </extensions>
