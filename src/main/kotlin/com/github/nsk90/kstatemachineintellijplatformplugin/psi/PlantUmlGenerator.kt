@@ -42,17 +42,21 @@ object PlantUmlGenerator {
         // The machine itself is a State — render it as a wrapping `state Name { … }`
         // block. Children are emitted recursively, including any nested machines
         // (which get the same wrap-in-named-block treatment).
-        appendStateDecl(machine, ids, unnamedIdx, indent = 0)
+        appendStateDecl(machine, ids, unnamedIdx, parentAncestors = emptyList(), indent = 0)
 
-        // Transitions are collected from every level so arrows cross nesting
-        // boundaries. Choice states also emit an outgoing arrow to their
-        // resolved redirect target when one is available.
+        // Global transition pass — emits arrows for every state that's NOT
+        // already had its transitions emitted inline by a parallel parent.
+        // PlantUML otherwise misreads transitions placed at the bottom of a
+        // parallel-region block as belonging to the wrong region.
         forEachStateWithAncestors(machine, ancestors = emptyList()) { source, ancestors ->
+            // Inside a parallel region: skip — the region's parallel parent
+            // already inlined this state's transitions next to the region body.
+            if (ancestors.any { it.isParallel }) return@forEachStateWithAncestors
             source.transitions.forEach { t ->
-                appendTransition(source, t, ancestors, ids, unnamedIdx)
+                appendTransition(source, t, ancestors, ids, unnamedIdx, indent = 0)
             }
             if (source.kind.isChoice() && source.redirectTarget != null) {
-                appendChoiceRedirect(source, ancestors, ids)
+                appendChoiceRedirect(source, ancestors, ids, indent = 0)
             }
         }
 
@@ -63,14 +67,16 @@ object PlantUmlGenerator {
         source: State,
         ancestors: List<State>,
         ids: Map<State, String>,
+        indent: Int,
     ) {
+        val pad = "  ".repeat(indent)
         val sourceId = ids[source] ?: return
         val target = resolveTarget(source.redirectTarget, source, ancestors)
         if (target != null) {
-            appendLine("$sourceId --> ${ids.getValue(target)}")
+            appendLine("$pad$sourceId --> ${ids.getValue(target)}")
         } else {
             // Unresolvable / external target — leave a hint instead of dropping it.
-            appendLine("note right of $sourceId : → ${escape(source.redirectTarget!!)}")
+            appendLine("${pad}note right of $sourceId : → ${escape(source.redirectTarget!!)}")
         }
     }
 
@@ -149,6 +155,7 @@ object PlantUmlGenerator {
         state: State,
         ids: Map<State, String>,
         unnamedIdx: java.util.IdentityHashMap<Any, Int>,
+        parentAncestors: List<State>,
         indent: Int,
     ) {
         val pad = "  ".repeat(indent)
@@ -167,23 +174,29 @@ object PlantUmlGenerator {
             appendLine("$pad$header")
         } else if (state.isParallel) {
             // Parallel/orthogonal region — each direct child is its own
-            // independent region, all active simultaneously. PlantUML's
-            // separator for concurrent regions is `--` placed *between*
-            // children inside the wrapping `state X { … }` block.
+            // independent region, all active simultaneously. PlantUML separates
+            // regions with `--`. The transitions for everything inside each
+            // region must be emitted INSIDE the region block (between the
+            // region's state body and the next `--` / closing brace) — if
+            // they're hoisted to the bottom like in non-parallel diagrams,
+            // PlantUML misreads them and the second region disappears.
             //
-            // Initial / final arrows are *per region* (inside each child),
-            // not at this level — they're emitted naturally by the recursive
-            // `appendStateDecl` for each child, since each region has its own
-            // initial substate.
+            // Initial / final arrows are per-region (inside each child), so
+            // we don't emit anything at this level for them — `appendStateDecl`
+            // on each child handles that.
             appendLine("$pad$header {")
+            val regionAncestors = listOf(state) + parentAncestors
             state.states.forEachIndexed { idx, child ->
                 if (idx > 0) appendLine("$pad  --")
-                appendStateDecl(child, ids, unnamedIdx, indent + 1)
+                appendStateDecl(child, ids, unnamedIdx, regionAncestors, indent + 1)
+                // Inline every transition in this region's subtree.
+                emitSubtreeTransitions(child, regionAncestors, ids, unnamedIdx, indent + 1)
             }
             appendLine("$pad}")
         } else {
             appendLine("$pad$header {")
-            state.states.forEach { appendStateDecl(it, ids, unnamedIdx, indent + 1) }
+            val innerAncestors = listOf(state) + parentAncestors
+            state.states.forEach { appendStateDecl(it, ids, unnamedIdx, innerAncestors, indent + 1) }
             state.states.firstOrNull { it.kind.isInitial() }?.let {
                 appendLine("$pad  [*] --> ${ids[it]}")
             }
@@ -197,25 +210,59 @@ object PlantUmlGenerator {
         }
     }
 
+    /**
+     * Depth-first walk through [root]'s subtree, emitting every state's
+     * transitions and choice-redirect arrows at [indent]. Used by the
+     * parallel-region branch of [appendStateDecl] so each region's arrows
+     * stay textually scoped to the region block.
+     *
+     * The matching skip in the global pass (`ancestors.any { it.isParallel }`)
+     * ensures these transitions aren't also emitted at the bottom.
+     */
+    private fun StringBuilder.emitSubtreeTransitions(
+        root: State,
+        rootAncestors: List<State>,
+        ids: Map<State, String>,
+        unnamedIdx: java.util.IdentityHashMap<Any, Int>,
+        indent: Int,
+    ) {
+        fun walk(node: State, ancestors: List<State>) {
+            node.transitions.forEach { t ->
+                appendTransition(node, t, ancestors, ids, unnamedIdx, indent)
+            }
+            if (node.kind.isChoice() && node.redirectTarget != null) {
+                appendChoiceRedirect(node, ancestors, ids, indent)
+            }
+            val nestedAncestors = listOf(node) + ancestors
+            node.states.forEach { walk(it, nestedAncestors) }
+        }
+        walk(root, rootAncestors)
+    }
+
     private fun StringBuilder.appendTransition(
         source: State,
         transition: Transition,
         ancestors: List<State>,
         ids: Map<State, String>,
         unnamedIdx: java.util.IdentityHashMap<Any, Int>,
+        indent: Int,
     ) {
+        val pad = "  ".repeat(indent)
         val sourceId = ids[source] ?: return
         val target = resolveTarget(transition.targetStateName, source, ancestors)
         val label = transitionLabel(transition, unnamedIdx[transition])
         if (target != null) {
             val targetId = ids.getValue(target)
-            appendLine("$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
+            appendLine("$pad$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
         } else if (transition.targetStateName != null) {
             // Unresolved external/dynamic target — annotate so the user sees it.
-            appendLine("note right of $sourceId : ${escape(label.ifEmpty { "Transition" })} → ${escape(transition.targetStateName)}")
-        } else if (label.isNotEmpty()) {
-            // Internal / target-less transition.
-            appendLine("note right of $sourceId : $label (internal)")
+            appendLine("${pad}note right of $sourceId : ${escape(label.ifEmpty { "Transition" })} → ${escape(transition.targetStateName)}")
+        } else {
+            // Targetless / internal transition — render as a self-loop on the
+            // source. KStateMachine's runtime PlantUML export uses the same
+            // convention, and a visible arrow on the state is far more
+            // discoverable than a side note.
+            appendLine("$pad$sourceId --> $sourceId${if (label.isEmpty()) "" else " : $label"}")
         }
     }
 
