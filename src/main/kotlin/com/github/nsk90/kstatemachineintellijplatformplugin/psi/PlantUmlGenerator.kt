@@ -184,23 +184,18 @@ object PlantUmlGenerator {
     ): State? {
         if (targetText.isNullOrBlank()) return null
         // Strip surrounding braces from `transitionOn` lambda targets: "{ redState }" → "redState"
-        val cleaned = targetText.trim().removePrefix("{").removeSuffix("}").trim()
+        // and any surrounding quotes from string-literal targets.
+        val cleaned = targetText.trim()
+            .removePrefix("{").removeSuffix("}").trim()
+            .trim('"')
+            .lowercase()
         // Look at siblings (including self) first, then walk up the ancestor chain.
         val scopes: List<List<State>> = listOf(source.states) +
             (listOf(source) + ancestors).map { it.states }
         for (scope in scopes) {
-            scope.firstOrNull { it.name == cleaned || matchesIdentifier(it.name, cleaned) }?.let { return it }
+            scope.firstOrNull { it.name.trim('"').lowercase() == cleaned }?.let { return it }
         }
         return null
-    }
-
-    private fun matchesIdentifier(stateName: String, targetText: String): Boolean {
-        // KStateMachine users frequently do `val redState = state("red")` and write
-        // `targetState = redState`. Accept a loose name match in either direction
-        // so the arrow still draws.
-        val a = stateName.trim('"').lowercase()
-        val b = targetText.trim('"').lowercase()
-        return a == b || b.startsWith(a) || a.startsWith(b)
     }
 
     private fun assignIds(state: State, out: MutableMap<State, String>, taken: MutableSet<String>) {
