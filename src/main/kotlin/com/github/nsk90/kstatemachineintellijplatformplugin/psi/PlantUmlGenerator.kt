@@ -124,7 +124,7 @@ object PlantUmlGenerator {
         appendLine("skinparam state {")
         appendLine("  BackgroundColor #3C3F41")
         appendLine("  BorderColor #9C9C9C")
-        appendLine("  BorderThickness 1.5")
+        appendLine("  BorderThickness 2")
         appendLine("  FontColor #DDDDDD")
         appendLine("  StartColor #DDDDDD")
         appendLine("  EndColor #DDDDDD")
@@ -224,7 +224,7 @@ object PlantUmlGenerator {
         return when {
             explicit != null -> escape(explicit)
             t.eventType != null -> "on ${escape(t.eventType)}"
-            else -> if (index != null) "Transition #$index" else "Transition"
+            else -> if (index != null) "Transition $index" else "Transition"
         }
     }
 
@@ -263,11 +263,14 @@ object PlantUmlGenerator {
     }
 
     private fun sanitizeId(name: String): String {
-        val cleaned = name.trim('"').replace(Regex("[^A-Za-z0-9_]"), "_")
-        return if (cleaned.isBlank() || !cleaned.first().isLetter() && cleaned.first() != '_') {
-            "s_${cleaned.ifBlank { "x" }}"
-        } else {
-            cleaned
+        val cleaned = name.trim('"')
+            .replace(Regex("[^A-Za-z0-9_]"), "_")
+            .trim('_')                       // drop leading/trailing underscores from substituted brackets
+            .replace(Regex("_+"), "_")       // collapse consecutive underscores
+        return when {
+            cleaned.isBlank() -> "s_x"
+            !cleaned.first().isLetter() && cleaned.first() != '_' -> "s_$cleaned"
+            else -> cleaned
         }
     }
 
@@ -275,14 +278,17 @@ object PlantUmlGenerator {
         text.trim('"').replace("\"", "\\\"").replace("\n", " ")
 
     // Friendly display name. Empty / "null" / "<unnamed>" become the bare type
-    // word ("State" / "StateMachine") with an optional index — same convention
-    // the tree view uses, so a label like "State #2" identifies the same node
-    // in both views.
+    // word ("State" / "StateMachine") with an optional index. We deliberately
+    // *don't* use the tree's "#N" syntax here — `#` inside a quoted display
+    // name confuses PlantUML's diagram-type heuristic (it gets parsed as a
+    // color literal prefix even inside quotes) and the diagram falls back to
+    // class-diagram mode, which then errors. Using "N" alone keeps the labels
+    // visually unique and PlantUML-safe.
     private fun State.displayName(index: Int?): String {
         val raw = name.trim('"')
         if (raw.isBlank() || raw == "null" || raw == "<unnamed>") {
             val typeLabel = if (this is StateMachine) "StateMachine" else "State"
-            return if (index != null) "$typeLabel #$index" else typeLabel
+            return if (index != null) "$typeLabel $index" else typeLabel
         }
         return raw
     }

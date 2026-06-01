@@ -223,6 +223,16 @@ class StateMachineTreePanel(private val project: Project) {
         } finally {
             suppressSelectionEvents = false
         }
+        // Also sync the diagram dropdown: editor-caret moves are routed
+        // through here with the selection listener suppressed (to avoid the
+        // navigate-back-to-editor loop), so the tree → diagram sync that
+        // normally happens via the selection listener has to be triggered
+        // explicitly. Without this, moving the caret into machine B's body
+        // while the diagram still shows machine A wouldn't refresh the
+        // dropdown — the user would have to switch tabs to notice.
+        match.topLevelMachine()?.let { machine ->
+            project.service<StateMachineViewService>().diagramPanel?.selectMachine(machine)
+        }
     }
 
     private fun buildNode(state: State): DefaultMutableTreeNode {
