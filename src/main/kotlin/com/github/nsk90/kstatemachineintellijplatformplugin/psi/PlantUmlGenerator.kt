@@ -6,28 +6,29 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
 
 /**
- * Emits PlantUML state-diagram source for a parsed [StateMachine] tree.
+ * Emits state-diagram source for a parsed [StateMachine] tree, in either
+ * PlantUML or Mermaid stateDiagram-v2 syntax.
  *
- * Names are sanitized into PlantUML identifiers and aliased back to the
- * original via `state "<orig>" as <id>`, so DSL state names containing
- * quotes / spaces / arrows still render correctly.
+ * PlantUML and Mermaid v2 share most of their state-diagram surface (the
+ * `state X { … }` block, `--` parallel separator, `[*]` pseudo-state,
+ * `<<choice>>` stereotype, `A --> B : event` transitions, `note right of …`).
+ * Only the header (preamble + theme directive), the footer, and the layout-
+ * direction directive differ — those branch on [DiagramSyntax]; the rest of
+ * the emission walks the model identically.
  *
- * Transitions resolve their `targetState = …` text against in-scope states
- * (siblings first, then ancestors). Unresolved targets are emitted as a
- * note next to the source — better than dropping them silently.
+ * Names are sanitized into identifiers and aliased back to the original via
+ * `state "<orig>" as <id>`, so DSL names with quotes / spaces / arrows still
+ * render correctly. Transitions resolve their `targetState = …` text against
+ * in-scope states; unresolved targets become side-notes.
  */
 object PlantUmlGenerator {
 
-    fun render(machine: StateMachine, darkTheme: Boolean = false): String = buildString {
-        appendLine("@startuml")
-        appendLine("!pragma layout smetana")
-        // Force vertical layout — the plugin's tool window is taller than it
-        // is wide, so left-to-right diagrams overflow horizontally and require
-        // constant scrolling. `top to bottom direction` is the official
-        // PlantUML directive for this.
-        appendLine("top to bottom direction")
-        appendLine("hide empty description")
-        if (darkTheme) appendDarkSkinparams()
+    fun render(
+        machine: StateMachine,
+        darkTheme: Boolean = false,
+        syntax: DiagramSyntax = DiagramSyntax.PLANTUML,
+    ): String = buildString {
+        appendHeader(syntax, darkTheme)
         appendLine()
 
         // Index unnamed states / transitions / nested machines per-machine,
@@ -46,8 +47,6 @@ object PlantUmlGenerator {
 
         // Global transition pass — emits arrows for every state that's NOT
         // already had its transitions emitted inline by a parallel parent.
-        // PlantUML otherwise misreads transitions placed at the bottom of a
-        // parallel-region block as belonging to the wrong region.
         forEachStateWithAncestors(machine, ancestors = emptyList()) { source, ancestors ->
             // Inside a parallel region: skip — the region's parallel parent
             // already inlined this state's transitions next to the region body.
@@ -60,7 +59,38 @@ object PlantUmlGenerator {
             }
         }
 
-        appendLine("@enduml")
+        appendFooter(syntax)
+    }
+
+    private fun StringBuilder.appendHeader(syntax: DiagramSyntax, darkTheme: Boolean) {
+        when (syntax) {
+            DiagramSyntax.PLANTUML -> {
+                appendLine("@startuml")
+                appendLine("!pragma layout smetana")
+                // Force vertical layout — the plugin's tool window is taller
+                // than it is wide, so left-to-right diagrams overflow
+                // horizontally. `top to bottom direction` is PlantUML's
+                // directive for this.
+                appendLine("top to bottom direction")
+                appendLine("hide empty description")
+                if (darkTheme) appendLine(darkThemeSkinparams())
+            }
+            DiagramSyntax.MERMAID -> {
+                // Mermaid's init directive must come BEFORE the diagram type
+                // declaration. `theme: dark` switches the built-in palette.
+                if (darkTheme) appendLine("%%{init: {'theme': 'dark'}}%%")
+                appendLine("stateDiagram-v2")
+                // `direction TB` mirrors PlantUML's `top to bottom direction`.
+                appendLine("    direction TB")
+            }
+        }
+    }
+
+    private fun StringBuilder.appendFooter(syntax: DiagramSyntax) {
+        when (syntax) {
+            DiagramSyntax.PLANTUML -> appendLine("@enduml")
+            DiagramSyntax.MERMAID -> {} // Mermaid has no terminator
+        }
     }
 
     private fun StringBuilder.appendChoiceRedirect(
@@ -113,14 +143,13 @@ object PlantUmlGenerator {
     }
 
     /**
-     * Skinparams tuned to roughly match Darcula's editor palette so the
-     * rendered PNG doesn't look out of place when embedded in the dark IDE.
-     * Embedded in the source string itself — so a theme change naturally
-     * busts the render cache (different source → cache miss → re-render).
+     * PlantUML skinparam block tuned to roughly match Darcula's editor palette
+     * so the rendered PNG doesn't look out of place inside the dark IDE.
+     * Public so [PlantUmlPlaygroundPanel] can reuse it when seeding its initial
+     * sample template — single source of truth for the dark-PlantUML styling.
      *
-     * Public so other panels (Playground) can reuse the same block when
-     * constructing their initial template — keeping a single source of truth
-     * for the dark-theme styling.
+     * Mermaid does NOT use this; the Mermaid path emits `%%{init: {'theme':'dark'}}%%`
+     * instead (handled in [appendHeader]).
      */
     fun darkThemeSkinparams(): String = buildString {
         appendLine("skinparam backgroundColor #2B2B2B")
@@ -142,10 +171,6 @@ object PlantUmlGenerator {
         appendLine("}")
     }.trimEnd()
 
-    private fun StringBuilder.appendDarkSkinparams() {
-        appendLine(darkThemeSkinparams())
-    }
-
     private fun isUnnamed(rawName: String): Boolean {
         val unquoted = rawName.trim('"')
         return unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>"
@@ -161,9 +186,8 @@ object PlantUmlGenerator {
         val pad = "  ".repeat(indent)
         val id = ids.getValue(state)
         val displayName = state.displayName(unnamedIdx[state])
-        // PlantUML state-stereotype suffix — `<<choice>>` renders the state as
-        // a conditional decision diamond, per
-        // https://plantuml.com/state-diagram#1f8b7d76aeff5c0a .
+        // `<<choice>>` stereotype is identical in PlantUML and Mermaid v2 —
+        // both render the state as a conditional decision diamond.
         val stereotype = if (state.kind.isChoice()) " <<choice>>" else ""
         val header = if (displayName == id) {
             "state $id$stereotype"
@@ -174,22 +198,18 @@ object PlantUmlGenerator {
             appendLine("$pad$header")
         } else if (state.isParallel) {
             // Parallel/orthogonal region — each direct child is its own
-            // independent region, all active simultaneously. PlantUML separates
-            // regions with `--`. The transitions for everything inside each
-            // region must be emitted INSIDE the region block (between the
-            // region's state body and the next `--` / closing brace) — if
-            // they're hoisted to the bottom like in non-parallel diagrams,
-            // PlantUML misreads them and the second region disappears.
-            //
-            // Initial / final arrows are per-region (inside each child), so
-            // we don't emit anything at this level for them — `appendStateDecl`
-            // on each child handles that.
+            // independent region, all active simultaneously. Both PlantUML
+            // and Mermaid v2 separate regions with `--`. The transitions for
+            // everything inside each region must be emitted INSIDE the region
+            // block (between the region's state body and the next `--` /
+            // closing brace) — if they're hoisted to the bottom like in
+            // non-parallel diagrams, the parser misreads them and the second
+            // region disappears.
             appendLine("$pad$header {")
             val regionAncestors = listOf(state) + parentAncestors
             state.states.forEachIndexed { idx, child ->
                 if (idx > 0) appendLine("$pad  --")
                 appendStateDecl(child, ids, unnamedIdx, regionAncestors, indent + 1)
-                // Inline every transition in this region's subtree.
                 emitSubtreeTransitions(child, regionAncestors, ids, unnamedIdx, indent + 1)
             }
             appendLine("$pad}")
@@ -200,9 +220,8 @@ object PlantUmlGenerator {
             state.states.firstOrNull { it.kind.isInitial() }?.let {
                 appendLine("$pad  [*] --> ${ids[it]}")
             }
-            // Final child → [*] arrow per PlantUML's terminal-state convention.
-            // INITIAL_FINAL states correctly get both arrows ([*]→X and X→[*])
-            // — they're entered first and also end the containing scope.
+            // Final child → [*] arrow. INITIAL_FINAL states get both arrows
+            // ([*]→X and X→[*]) — they're entered first and end the scope.
             state.states.filter { it.kind.isFinal() }.forEach { finalChild ->
                 appendLine("$pad  ${ids[finalChild]} --> [*]")
             }
@@ -210,15 +229,6 @@ object PlantUmlGenerator {
         }
     }
 
-    /**
-     * Depth-first walk through [root]'s subtree, emitting every state's
-     * transitions and choice-redirect arrows at [indent]. Used by the
-     * parallel-region branch of [appendStateDecl] so each region's arrows
-     * stay textually scoped to the region block.
-     *
-     * The matching skip in the global pass (`ancestors.any { it.isParallel }`)
-     * ensures these transitions aren't also emitted at the bottom.
-     */
     private fun StringBuilder.emitSubtreeTransitions(
         root: State,
         rootAncestors: List<State>,
@@ -255,13 +265,9 @@ object PlantUmlGenerator {
             val targetId = ids.getValue(target)
             appendLine("$pad$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
         } else if (transition.targetStateName != null) {
-            // Unresolved external/dynamic target — annotate so the user sees it.
             appendLine("${pad}note right of $sourceId : ${escape(label.ifEmpty { "Transition" })} → ${escape(transition.targetStateName)}")
         } else {
-            // Targetless / internal transition — render as a self-loop on the
-            // source. KStateMachine's runtime PlantUML export uses the same
-            // convention, and a visible arrow on the state is far more
-            // discoverable than a side note.
+            // Targetless / internal — self-loop on the source.
             appendLine("$pad$sourceId --> $sourceId${if (label.isEmpty()) "" else " : $label"}")
         }
     }
@@ -281,13 +287,10 @@ object PlantUmlGenerator {
         ancestors: List<State>,
     ): State? {
         if (targetText.isNullOrBlank()) return null
-        // Strip surrounding braces from `transitionOn` lambda targets: "{ redState }" → "redState"
-        // and any surrounding quotes from string-literal targets.
         val cleaned = targetText.trim()
             .removePrefix("{").removeSuffix("}").trim()
             .trim('"')
             .lowercase()
-        // Look at siblings (including self) first, then walk up the ancestor chain.
         val scopes: List<List<State>> = listOf(source.states) +
             (listOf(source) + ancestors).map { it.states }
         for (scope in scopes) {
@@ -312,8 +315,8 @@ object PlantUmlGenerator {
     private fun sanitizeId(name: String): String {
         val cleaned = name.trim('"')
             .replace(Regex("[^A-Za-z0-9_]"), "_")
-            .trim('_')                       // drop leading/trailing underscores from substituted brackets
-            .replace(Regex("_+"), "_")       // collapse consecutive underscores
+            .trim('_')
+            .replace(Regex("_+"), "_")
         return when {
             cleaned.isBlank() -> "s_x"
             !cleaned.first().isLetter() && cleaned.first() != '_' -> "s_$cleaned"
@@ -324,13 +327,6 @@ object PlantUmlGenerator {
     private fun escape(text: String): String =
         text.trim('"').replace("\"", "\\\"").replace("\n", " ")
 
-    // Friendly display name. Empty / "null" / "<unnamed>" become the bare type
-    // word ("State" / "StateMachine") with an optional index. We deliberately
-    // *don't* use the tree's "#N" syntax here — `#` inside a quoted display
-    // name confuses PlantUML's diagram-type heuristic (it gets parsed as a
-    // color literal prefix even inside quotes) and the diagram falls back to
-    // class-diagram mode, which then errors. Using "N" alone keeps the labels
-    // visually unique and PlantUML-safe.
     private fun State.displayName(index: Int?): String {
         val raw = name.trim('"')
         if (raw.isBlank() || raw == "null" || raw == "<unnamed>") {

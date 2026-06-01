@@ -1,7 +1,9 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow
 
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
+import com.github.nsk90.kstatemachineintellijplatformplugin.psi.DiagramSyntax
 import com.github.nsk90.kstatemachineintellijplatformplugin.psi.PlantUmlGenerator
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.ui.ComboBox
@@ -15,6 +17,8 @@ import net.sourceforge.plantuml.FileFormat
 import net.sourceforge.plantuml.FileFormatOption
 import net.sourceforge.plantuml.SourceStringReader
 import java.awt.BorderLayout
+import java.awt.CardLayout
+import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.event.ActionListener
 import java.awt.image.BufferedImage
@@ -23,10 +27,17 @@ import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 import javax.swing.ImageIcon
 import javax.swing.JComponent
+import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.SwingConstants
 
+private const val SYNTAX_PREF_KEY = "ksm.diagram.syntax"
+private const val PLANTUML_CARD = "plantuml"
+private const val MERMAID_CARD = "mermaid"
+
 class StateMachineDiagramPanel {
+
+    // --- PlantUML rendering surface ---
     private val imageLabel = JBLabel("", SwingConstants.CENTER).apply {
         verticalAlignment = SwingConstants.TOP
         horizontalAlignment = SwingConstants.LEFT
@@ -34,39 +45,76 @@ class StateMachineDiagramPanel {
     private val imageContainer = JPanel(BorderLayout()).apply { add(imageLabel, BorderLayout.CENTER) }
     private val imageScroll = JBScrollPane(imageContainer)
 
+    // --- Mermaid rendering surface ---
+    private val mermaidRenderer = MermaidRenderer()
+
+    // --- Image area: card layout to swap between PlantUML and Mermaid ---
+    private val imageCards = CardLayout()
+    private val imageArea = JPanel(imageCards).apply {
+        add(imageScroll, PLANTUML_CARD)
+        add(mermaidRenderer.component, MERMAID_CARD)
+    }
+
+    // --- Source pane ---
     private val sourceArea = JBTextArea().apply {
         isEditable = false
         lineWrap = false
         font = Font(Font.MONOSPACED, Font.PLAIN, 12)
-        border = IdeBorderFactory.createTitledBorder("PlantUML source", false)
+        border = IdeBorderFactory.createTitledBorder("Diagram source", false)
     }
     private val sourceScroll = JBScrollPane(sourceArea)
 
     private val splitter = JBSplitter(/* vertical = */ true, /* proportion = */ 0.7f).apply {
-        firstComponent = imageScroll
+        firstComponent = imageArea
         secondComponent = sourceScroll
         setHonorComponentsMinimumSize(true)
     }
 
+    // --- Top toolbar ---
     private val machineSelector = ComboBox<MachineEntry>()
-    private val selectorListener = ActionListener { renderSelected() }
+    private val syntaxSelector = ComboBox(DiagramSyntax.values())
+    private val machineSelectorListener = ActionListener { renderSelected() }
+    private val syntaxSelectorListener = ActionListener {
+        val newSyntax = syntaxSelector.selectedItem as? DiagramSyntax ?: return@ActionListener
+        if (newSyntax == currentSyntax) return@ActionListener
+        currentSyntax = newSyntax
+        PropertiesComponent.getInstance().setValue(SYNTAX_PREF_KEY, newSyntax.name)
+        applyCard(newSyntax)
+        // Force a re-render (cache key now mismatches because syntax changed).
+        lastRenderedSource = null
+        renderSelected()
+    }
+
+    private val topBar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+        add(JLabel("Renderer:"))
+        add(syntaxSelector)
+        add(machineSelector)
+    }
 
     private val rootPanel = JPanel(BorderLayout()).apply {
-        add(machineSelector, BorderLayout.NORTH)
+        add(topBar, BorderLayout.NORTH)
         add(splitter, BorderLayout.CENTER)
     }
 
     val component: JComponent get() = rootPanel
 
-    /** Last successfully generated PlantUML source. Used by Copy / Export actions. */
+    /** Last successfully generated source (PlantUML or Mermaid). Used by Copy / Export. */
     @Volatile
     var currentPlantUml: String? = null
         private set
 
-    /** Last rendered image (cached for Export actions). */
+    /** Last rendered PlantUML image (cached for Export). Null when current renderer is Mermaid. */
     @Volatile
     var currentImage: BufferedImage? = null
         private set
+
+    /** The renderer currently driving the diagram tab. */
+    @Volatile
+    var currentSyntax: DiagramSyntax = loadPersistedSyntax()
+        private set
+
+    /** SVG markup from the last Mermaid render — used by the Export action. */
+    val currentMermaidSvg: String? get() = mermaidRenderer.currentSvg
 
     private var lastRenderedSource: String? = null
 
@@ -74,7 +122,10 @@ class StateMachineDiagramPanel {
     private var currentMachines: List<StateMachine> = emptyList()
 
     init {
-        machineSelector.addActionListener(selectorListener)
+        machineSelector.addActionListener(machineSelectorListener)
+        syntaxSelector.selectedItem = currentSyntax
+        syntaxSelector.addActionListener(syntaxSelectorListener)
+        applyCard(currentSyntax)
     }
 
     fun showPlaceholder(message: String) {
@@ -83,7 +134,10 @@ class StateMachineDiagramPanel {
         currentPlantUml = null
         currentImage = null
         lastRenderedSource = null
-        updateLabel(message)
+        when (currentSyntax) {
+            DiagramSyntax.PLANTUML -> updateLabel(message)
+            DiagramSyntax.MERMAID -> mermaidRenderer.showPlaceholder(message)
+        }
         updateSourceArea("")
     }
 
@@ -100,9 +154,7 @@ class StateMachineDiagramPanel {
     /**
      * Switch the dropdown to the entry for [machine]. Used by the tree panel
      * so that selecting a node inside machine B in the Structure tab
-     * automatically shows machine B in the Diagram tab when the user
-     * switches over. No-op if the machine isn't in the current list or is
-     * already selected.
+     * automatically shows machine B in the Diagram tab.
      */
     fun selectMachine(machine: StateMachine) {
         val targetIdx = currentMachines.indexOfFirst { it === machine }
@@ -115,20 +167,11 @@ class StateMachineDiagramPanel {
         machineSelector.selectedIndex = itemIdx
     }
 
-    /**
-     * Repopulates the machine dropdown. Labels match the tree's convention
-     * exactly so the user can read `StateMachine #2` in the tree and find the
-     * same entry in the dropdown without guessing. Keeps the user's selection
-     * across re-renders by matching on the rendered label.
-     */
     private fun rebuildSelector(machines: List<StateMachine>) {
         val previousLabel = (machineSelector.selectedItem as? MachineEntry)?.label
-        // Suppress fire-on-change while we mutate the model.
-        machineSelector.removeActionListener(selectorListener)
+        machineSelector.removeActionListener(machineSelectorListener)
         try {
             machineSelector.removeAllItems()
-            // Per-file index of unnamed machines, mirroring the tree's
-            // computeUnnamedIndices top-level counter.
             var unnamedCounter = 0
             machines.forEachIndexed { idx, m ->
                 val label = if (m.name.isMachineUnnamed()) {
@@ -139,7 +182,6 @@ class StateMachineDiagramPanel {
                 }
                 machineSelector.addItem(MachineEntry(label, idx))
             }
-            // Hide the chooser entirely when there's nothing to choose between.
             machineSelector.isVisible = machines.size > 1
             if (machines.isNotEmpty()) {
                 val matchIdx = (0 until machineSelector.itemCount).firstOrNull { i ->
@@ -148,7 +190,7 @@ class StateMachineDiagramPanel {
                 machineSelector.selectedIndex = matchIdx
             }
         } finally {
-            machineSelector.addActionListener(selectorListener)
+            machineSelector.addActionListener(machineSelectorListener)
         }
     }
 
@@ -160,18 +202,23 @@ class StateMachineDiagramPanel {
     }
 
     private fun renderMachine(machine: StateMachine) {
-        // Read the LaF flag at render time so a theme change between renders
-        // produces a different source string and naturally invalidates the
-        // image cache (no separate listener required).
-        val source = PlantUmlGenerator.render(machine, darkTheme = !JBColor.isBright())
+        val dark = !JBColor.isBright()
+        val source = PlantUmlGenerator.render(machine, darkTheme = dark, syntax = currentSyntax)
         currentPlantUml = source
         updateSourceArea(source)
 
-        if (source == lastRenderedSource && currentImage != null) {
-            // Identical input — the existing icon is still valid.
+        if (source == lastRenderedSource && (currentImage != null || currentSyntax == DiagramSyntax.MERMAID)) {
             return
         }
+        lastRenderedSource = source
 
+        when (currentSyntax) {
+            DiagramSyntax.PLANTUML -> renderPlantUml(machine, source)
+            DiagramSyntax.MERMAID -> mermaidRenderer.render(source, dark)
+        }
+    }
+
+    private fun renderPlantUml(machine: StateMachine, source: String) {
         ApplicationManager.getApplication().executeOnPooledThread {
             val image = try {
                 renderPng(source)
@@ -185,7 +232,6 @@ class StateMachineDiagramPanel {
                     updateLabel("Failed to render diagram — see IDE log for details")
                 } else {
                     currentImage = image
-                    lastRenderedSource = source
                     imageLabel.text = null
                     imageLabel.icon = ImageIcon(image)
                     imageLabel.toolTipText = (machineSelector.selectedItem as? MachineEntry)?.label
@@ -220,12 +266,20 @@ class StateMachineDiagramPanel {
         }
     }
 
-    /**
-     * Combobox row. `label` is the display string already in tree-matching
-     * form (`Hero` for named, `StateMachine #2` for unnamed). `index` is the
-     * machine's position in the source list so [renderSelected] can look it
-     * up again.
-     */
+    private fun applyCard(syntax: DiagramSyntax) {
+        ApplicationManager.getApplication().invokeLater {
+            val name = if (syntax == DiagramSyntax.PLANTUML) PLANTUML_CARD else MERMAID_CARD
+            imageCards.show(imageArea, name)
+        }
+    }
+
+    private fun loadPersistedSyntax(): DiagramSyntax {
+        val raw = PropertiesComponent.getInstance().getValue(SYNTAX_PREF_KEY)
+            ?: return DiagramSyntax.PLANTUML
+        return runCatching { DiagramSyntax.valueOf(raw) }.getOrDefault(DiagramSyntax.PLANTUML)
+    }
+
+    /** Combobox row. `label` is the display string already in tree-matching form. */
     private data class MachineEntry(val label: String, val index: Int) {
         override fun toString(): String = label
     }

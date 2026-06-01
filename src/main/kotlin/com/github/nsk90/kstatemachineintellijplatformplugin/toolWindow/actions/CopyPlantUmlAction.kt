@@ -9,9 +9,14 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.ide.CopyPasteManager
 import java.awt.datatransfer.StringSelection
 
+/**
+ * Copies whichever diagram source is currently active in the Diagram tab —
+ * PlantUML or Mermaid. Class name kept as-is for binary-compat with any
+ * persisted action-id references; the user-facing presentation is generic.
+ */
 class CopyPlantUmlAction : AnAction(
-    "Copy PlantUML",
-    "Copy generated PlantUML source to the clipboard",
+    "Copy Diagram Source",
+    "Copy the active diagram source (PlantUML or Mermaid) to the clipboard",
     AllIcons.Actions.Copy,
 ) {
     override fun actionPerformed(e: AnActionEvent) {
