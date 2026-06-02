@@ -6,7 +6,12 @@ import org.jetbrains.kotlin.psi.KtCallExpression
 class Transition(
     val name: String,
     val pointer: SmartPsiElementPointer<KtCallExpression>? = null,
-    val targetStateName: String? = null,
+    /**
+     * Every statically-resolvable outcome of the transition. Empty when the
+     * transition has no target (true internal/self) OR when the target lives
+     * in a lambda the parser couldn't statically analyse.
+     */
+    val targetGroups: List<TargetGroup> = emptyList(),
     val eventType: String? = null,
     /** Raw DSL function name: `transition`, `transitionOn`, `transitionConditionally`, `dataTransition`, `dataTransitionOn`. */
     val callee: String? = null,
@@ -16,4 +21,10 @@ class Transition(
     val guard: Guard? = null,
     /** For `dataTransition<E, D>` / `dataTransitionOn<E, D>` — the `D` type-arg text. */
     val dataType: String? = null,
-)
+) {
+    /** First target across all groups — convenience for callers that only need a single target. */
+    val targetStateName: String? get() = targetGroups.firstOrNull()?.targets?.firstOrNull()
+
+    /** All target names flattened across groups. Used by the tree's right-click navigation. */
+    val allTargetNames: List<String> get() = targetGroups.flatMap { it.targets }
+}

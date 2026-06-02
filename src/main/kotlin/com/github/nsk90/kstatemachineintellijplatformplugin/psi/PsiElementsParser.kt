@@ -4,6 +4,7 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.Guard
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.State
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateKind
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.TargetGroup
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
 import com.intellij.psi.PsiElement
 import com.intellij.psi.SmartPointerManager
@@ -17,11 +18,13 @@ import org.jetbrains.kotlin.psi.KtClassBody
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtIfExpression
 import org.jetbrains.kotlin.psi.KtLambdaExpression
 import org.jetbrains.kotlin.psi.KtNameReferenceExpression
 import org.jetbrains.kotlin.psi.KtObjectDeclaration
 import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.KtStringTemplateExpression
+import org.jetbrains.kotlin.psi.KtWhenExpression
 
 private const val NAME_ARGUMENT = "name"
 private const val STATE_ARGUMENT = "state"
@@ -30,6 +33,10 @@ private const val HISTORY_TYPE_ARGUMENT = "historyType"
 private const val DEFAULT_DATA_ARGUMENT = "defaultData"
 private const val TARGET_STATE_PROPERTY = "targetState"
 private const val GUARD_PROPERTY = "guard"
+private const val DIRECTION_PROPERTY = "direction"
+private const val TRANSITION_CONDITIONALLY_CALLEE = "transitionConditionally"
+private const val TARGET_STATE_CALL = "targetState"
+private const val TARGET_PARALLEL_STATES_CALL = "targetParallelStates"
 
 fun interface Output {
     fun write(message: String)
@@ -66,7 +73,7 @@ class PsiElementsParser(private val output: Output) {
                     transitions += Transition(
                         name = transitionName,
                         pointer = pointerManager.createSmartPsiElementPointer(call),
-                        targetStateName = call.findTargetStateName(),
+                        targetGroups = call.findTargetGroups(),
                         eventType = call.typeArguments.firstOrNull()?.text,
                         callee = calleeText,
                         isGuarded = guardEntry != null,
@@ -141,9 +148,11 @@ class PsiElementsParser(private val output: Output) {
             dataType = if (kind.isData()) call.typeArguments.firstOrNull()?.text else null,
             defaultData = if (kind.isData()) call.findDefaultData() else null,
             // choiceState / initialChoiceState / choiceDataState /
-            // initialChoiceDataState — the lambda body is a redirect expression
-            // returning the target state. Try to resolve it when it's simple.
-            redirectTarget = if (kind.isChoice()) call.findChoiceRedirectTarget() else null,
+            // initialChoiceDataState — the lambda body returns the target state.
+            // We collect every statically-resolvable identifier in every return
+            // position (if/when branches included), so a `choiceState { if (c) A else B }`
+            // surfaces both A and B.
+            redirectTargets = if (kind.isChoice()) call.findChoiceRedirectTargets() else emptyList(),
         )
     }
 
@@ -263,58 +272,127 @@ private fun KtCallExpression.kindFromCallee(): StateKind = when (calleeExpressio
     else -> StateKind.STATE
 }
 
-// Best-effort: find the right-hand side of `targetState = …`. KStateMachine
-// supports two forms:
-//   transition<E>("name", targetState = Jumping)      // value argument
-//   transition<E>("name") { targetState = X }          // lambda body assignment
-//   transitionOn<E>("name") { targetState = { X } }    // transitionOn lambda
-//
-// Returns the state's logical NAME when the right-hand side resolves to a
-// state factory call (directly or via local val / file-level constant chain).
-// Falls back to the raw expression text when nothing resolves. So
-//   val checkpoint = initialState("Save Point")
-//   transition<E>(targetState = checkpoint)            →  "\"Save Point\""
-// matches the same state node the tree shows for that initialState call.
-private fun KtCallExpression.findTargetStateName(): String? {
+/**
+ * Collect every statically-resolvable target this transition can route to. A
+ * single-target transition (`transition<E>(targetState = X)`) returns one
+ * one-target group; a branching `transitionOn { targetState = { if … else … } }`
+ * returns one group per branch; a `transitionConditionally { direction = { … } }`
+ * returns one group per `targetState(…)` / `targetParallelStates(…)` call found
+ * inside the direction lambda, with `isParallel = true` for the latter so the
+ * diagram can render it as a fork.
+ *
+ * Each target name is resolved structurally via [resolveStateNameFromExpr],
+ * falling back to the raw expression text — same rule the rest of the pipeline
+ * already uses, keeping cross-file object references informative even without
+ * a binding context.
+ */
+private fun KtCallExpression.findTargetGroups(): List<TargetGroup> {
     // (1) Named value argument: `transition<E>(targetState = Foo)`
     val valueArgExpr = valueArgumentList?.arguments
         ?.firstOrNull { it.getArgumentName()?.asName?.asString() == TARGET_STATE_PROPERTY }
         ?.getArgumentExpression()
     if (valueArgExpr != null) {
-        return resolveStateNameFromExpr(valueArgExpr) ?: valueArgExpr.text
+        val name = resolveStateNameFromExpr(valueArgExpr) ?: valueArgExpr.text
+        return listOf(TargetGroup(targets = listOf(name), isParallel = false))
     }
-    // (2) Assignment inside the lambda body. Pull the raw RHS expression first
-    // — for transitionOn's `targetState = { … }` we peek inside the lambda
-    // when it holds a single identifier expression we can chase.
-    val body = dslLambda()?.bodyExpression ?: return null
-    var rhsExpr: KtExpression? = null
+
+    // (2) transitionConditionally — look for `direction = { … }` lambda and walk
+    // it for targetState / targetParallelStates calls.
+    val callee = calleeExpression?.text
+    if (callee == TRANSITION_CONDITIONALLY_CALLEE) {
+        val directionLambda =
+            findLambdaAssignmentEntry(DIRECTION_PROPERTY)?.right as? KtLambdaExpression
+                ?: return emptyList()
+        return extractConditionalGroups(directionLambda)
+    }
+
+    // (3) Other forms — `targetState = …` inside the transition lambda. The
+    // RHS is either an expression (transition / dataTransition) or another
+    // lambda (transitionOn / dataTransitionOn).
+    val targetEntry = findLambdaAssignmentEntry(TARGET_STATE_PROPERTY) ?: return emptyList()
+    val rhs = targetEntry.right ?: return emptyList()
+    if (rhs is KtLambdaExpression) {
+        // transitionOn-style — each branch in the lambda is one alternative
+        // single-target outcome.
+        return extractDirectTargets(rhs).map { TargetGroup(targets = listOf(it), isParallel = false) }
+    }
+    val name = resolveStateNameFromExpr(rhs) ?: rhs.text
+    return listOf(TargetGroup(targets = listOf(name), isParallel = false))
+}
+
+/**
+ * Walk a `transitionConditionally { direction = { … } }` body looking for
+ * KStateMachine direction-builder calls (`targetState(s)` / `targetParallelStates(s1, s2…)`).
+ * Each call becomes one [TargetGroup]; `targetParallelStates` produces a group
+ * with `isParallel = true` so the renderer emits a `<<fork>>` pseudo-state.
+ * Other call shapes (`noTransition()`, `stay()`, user helpers) are ignored.
+ */
+private fun extractConditionalGroups(directionLambda: KtLambdaExpression): List<TargetGroup> {
+    val body = directionLambda.bodyExpression ?: return emptyList()
+    val groups = mutableListOf<TargetGroup>()
     fun walk(element: PsiElement) {
-        if (rhsExpr != null) return
         for (child in element.children) {
             if (child is KtLambdaExpression) continue
-            if (child is KtBinaryExpression
-                && child.operationToken == KtTokens.EQ
-                && child.left?.text == TARGET_STATE_PROPERTY
-            ) {
-                rhsExpr = child.right
-                return
+            if (child is KtCallExpression) {
+                val callee = child.calleeExpression?.text
+                if (callee == TARGET_STATE_CALL || callee == TARGET_PARALLEL_STATES_CALL) {
+                    val args = child.valueArguments
+                        .mapNotNull { it.getArgumentExpression() }
+                        .mapNotNull { resolveStateNameFromExpr(it) ?: it.targetFallbackText() }
+                        .distinct()
+                    if (args.isNotEmpty()) {
+                        groups += TargetGroup(
+                            targets = args,
+                            isParallel = callee == TARGET_PARALLEL_STATES_CALL,
+                        )
+                    }
+                }
             }
             walk(child)
         }
     }
     walk(body)
-    val rhs = rhsExpr ?: return null
+    return groups
+}
 
-    if (rhs is KtLambdaExpression) {
-        // transitionOn-style `{ someState }`. If the lambda body is a single
-        // expression we can resolve, use the resolved name. Otherwise keep the
-        // raw lambda text so the tree renderer still shows the user something.
-        rhs.bodyExpression?.statements?.singleOrNull()
-            ?.let { single -> resolveStateNameFromExpr(single) }
-            ?.let { return it }
-        return rhs.text
+/**
+ * Walk return-position expressions in [lambda] and collect every
+ * statically-resolvable state reference. Used for `transitionOn`-style
+ * `targetState = { … }` lambdas (each return point is one alternative branch)
+ * and for `choiceState`-family bodies (same shape, the lambda returns a
+ * single `State`). De-duplicates so `{ if (c) A else A }` yields one entry.
+ */
+private fun extractDirectTargets(lambda: KtLambdaExpression): List<String> {
+    val result = LinkedHashSet<String>()
+    fun consider(expr: KtExpression?) {
+        if (expr == null) return
+        when (expr) {
+            is KtBlockExpression -> consider(expr.statements.lastOrNull() as? KtExpression)
+            is KtIfExpression -> {
+                consider(expr.then)
+                consider(expr.`else`)
+            }
+            is KtWhenExpression -> expr.entries.forEach { consider(it.expression) }
+            else -> {
+                val name = resolveStateNameFromExpr(expr) ?: expr.targetFallbackText()
+                if (name != null) result += name
+            }
+        }
     }
-    return resolveStateNameFromExpr(rhs) ?: rhs.text
+    lambda.bodyExpression?.statements?.lastOrNull()?.let { consider(it as? KtExpression) }
+    return result.toList()
+}
+
+/**
+ * Last-resort fallback for an expression in target position: a bare identifier
+ * (or the selector of a dotted reference) maps to its text; everything else
+ * (operators, literals, opaque calls) returns null so we don't pollute the
+ * target list with noise from condition expressions inside the same lambda.
+ */
+private fun KtExpression.targetFallbackText(): String? = when (this) {
+    is KtNameReferenceExpression -> text
+    is KtDotQualifiedExpression -> (selectorExpression as? KtNameReferenceExpression)?.text
+    else -> null
 }
 
 /**
@@ -416,30 +494,15 @@ private fun KtCallExpression.findLambdaAssignment(propertyName: String): String?
     findLambdaAssignmentEntry(propertyName)?.right?.text
 
 /**
- * For `choiceState`-family calls, look at the trailing lambda body. If it's a
- * single expression that resolves to a state factory call (directly or via a
- * local val chain), return that state's name. Returns null when the body has
- * multiple statements or contains branching/computed logic — there's no
- * single deterministic target to point at in that case.
- *
- * Same resolution path the transition target uses; reuses [resolveStateNameFromExpr].
+ * For `choiceState`-family calls, walk the trailing lambda body and surface every
+ * statically-resolvable target the body can return. Single-expression bodies
+ * yield one entry; branching bodies (`{ if (cond) A else B }`, `when { … }`)
+ * yield one entry per resolved branch. Returns empty when nothing structurally
+ * resolves — same fallback policy as [extractDirectTargets].
  */
-private fun KtCallExpression.findChoiceRedirectTarget(): String? {
-    val body = dslLambda()?.bodyExpression ?: return null
-    val single = body.statements.singleOrNull() ?: return null
-    // Structural resolution first (val/var chains, factory calls, same-file
-    // object declarations). If that returns null, fall back to the raw
-    // identifier text — that handles cross-file object references like
-    // `{ State2 }` where `State2` is an `object` defined in another module
-    // and imported here; we can't statically verify it's a State without
-    // binding context, but in a choiceState lambda the user's intent is
-    // unambiguous, so trusting the identifier is the right trade-off.
-    resolveStateNameFromExpr(single)?.let { return it }
-    return when (single) {
-        is KtNameReferenceExpression -> single.text
-        is KtDotQualifiedExpression -> (single.selectorExpression as? KtNameReferenceExpression)?.text
-        else -> null
-    }
+private fun KtCallExpression.findChoiceRedirectTargets(): List<String> {
+    val lambda = dslLambda() ?: return emptyList()
+    return extractDirectTargets(lambda)
 }
 
 /**

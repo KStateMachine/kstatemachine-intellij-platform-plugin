@@ -4,6 +4,7 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.Guard
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.State
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateKind
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.TargetGroup
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
 import com.github.nsk90.kstatemachineintellijplatformplugin.services.StateMachineViewService
 import com.intellij.icons.AllIcons
@@ -86,11 +87,12 @@ class StateMachineTreePanel(private val project: Project) {
         // names, and a tree-wide search would jump to the first match in some
         // unrelated machine.
         val searchRoot = node.enclosingMachineNode() ?: rootNode
-        val targetNode = when (val data = node.userObject) {
-            is Transition -> findTargetStateNode(data, searchRoot)
-            is State -> findChoiceTargetNode(data, searchRoot)
-            else -> null
-        } ?: return
+        val resolved = when (val data = node.userObject) {
+            is Transition -> findTargetStateNodes(data.allTargetNames, searchRoot)
+            is State -> findTargetStateNodes(data.redirectTargets, searchRoot)
+            else -> emptyList()
+        }
+        if (resolved.isEmpty()) return
 
         // Select the right-clicked row first so the popup visibly belongs to it.
         // Suppress the selection listener so we don't open the source location
@@ -103,48 +105,48 @@ class StateMachineTreePanel(private val project: Project) {
         }
 
         JPopupMenu().apply {
-            add(JMenuItem("Navigate to target state").apply {
-                addActionListener { selectNode(targetNode) }
-            })
+            if (resolved.size == 1) {
+                // Single-target case keeps the familiar wording.
+                val (_, targetNode) = resolved.single()
+                add(JMenuItem("Navigate to target state").apply {
+                    addActionListener { selectNode(targetNode) }
+                })
+            } else {
+                resolved.forEach { (name, targetNode) ->
+                    add(JMenuItem("Navigate to: ${name.unquote()}").apply {
+                        addActionListener { selectNode(targetNode) }
+                    })
+                }
+            }
         }.show(tree, e.x, e.y)
     }
 
-    private fun findChoiceTargetNode(
-        state: State,
+    /**
+     * Resolve each entry in [names] to a tree node under [searchRoot], dropping
+     * unresolved ones. Order preserved from the source list. Handles
+     * `transitionOn`-style lambda text (`{ someState }`) by stripping the braces
+     * before name matching — same heuristic the old single-target resolver used.
+     */
+    private fun findTargetStateNodes(
+        names: List<String>,
         searchRoot: DefaultMutableTreeNode,
-    ): DefaultMutableTreeNode? {
-        val raw = state.redirectTarget?.trim() ?: return null
-        val target = raw.removeSurrounding("\"").trim()
-        if (target.isEmpty()) return null
-        return findStateNodeByName(searchRoot, target)
-    }
-
-    private fun findTargetStateNode(
-        transition: Transition,
-        searchRoot: DefaultMutableTreeNode,
-    ): DefaultMutableTreeNode? {
-        val raw = transition.targetStateName?.trim() ?: return null
-        val target = when {
-            // transitionOn lambda — `targetState = { someState }`. If the lambda
-            // body is a single identifier (optionally dotted, e.g. `Names.RED`),
-            // we can resolve it just like a plain reference. Anything with
-            // operators / branches / calls (`{ if (…) A else B }`) stays
-            // unresolved — there's no single deterministic target.
-            raw.startsWith("{") && raw.endsWith("}") -> {
-                val body = raw.removeSurrounding("{", "}").trim()
-                    .removePrefix("this.").trim()
-                if (body.isNotEmpty() && body.all { it.isLetterOrDigit() || it == '_' || it == '.' }) {
-                    // Use the last segment for dotted refs like `Names.RED` so
-                    // the tree match works against state nodes named `RED`.
-                    body.substringAfterLast('.')
-                } else {
-                    return null
+    ): List<Pair<String, DefaultMutableTreeNode>> = names.mapNotNull { raw ->
+        val cleaned = raw.trim().let { trimmed ->
+            when {
+                trimmed.startsWith("{") && trimmed.endsWith("}") -> {
+                    val body = trimmed.removeSurrounding("{", "}").trim()
+                        .removePrefix("this.").trim()
+                    if (body.isNotEmpty() && body.all { it.isLetterOrDigit() || it == '_' || it == '.' }) {
+                        body.substringAfterLast('.')
+                    } else {
+                        return@mapNotNull null
+                    }
                 }
+                else -> trimmed.removeSurrounding("\"").trim()
             }
-            else -> raw.removeSurrounding("\"").trim()
         }
-        if (target.isEmpty()) return null
-        return findStateNodeByName(searchRoot, target)
+        if (cleaned.isEmpty()) return@mapNotNull null
+        findStateNodeByName(searchRoot, cleaned)?.let { cleaned to it }
     }
 
     private fun findStateNodeByName(node: DefaultMutableTreeNode, name: String): DefaultMutableTreeNode? {
@@ -336,8 +338,11 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                 if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.dataType != null) append("  <${data.dataType}>", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.defaultData != null) append("  defaultData = ${data.defaultData}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                if (data.redirectTarget != null) {
-                    append("  → ${data.redirectTarget.unquote()}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                if (data.redirectTargets.isNotEmpty()) {
+                    append(
+                        "  → ${data.redirectTargets.joinToString(", ") { it.unquote() }}",
+                        SimpleTextAttributes.GRAYED_ATTRIBUTES,
+                    )
                 }
             }
             is Transition -> {
@@ -349,8 +354,9 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                     if (typeArgs != null && !label.contains(typeArgs)) {
                         append("  $typeArgs")
                     }
-                    if (!data.targetStateName.isNullOrBlank()) {
-                        append("  → ${data.targetStateName.unquote()}")
+                    val targetsLabel = data.targetGroups.targetsLabel()
+                    if (targetsLabel.isNotEmpty()) {
+                        append("  → $targetsLabel")
                     }
                     val tags = data.transitionTags()
                     if (tags.isNotEmpty()) {
@@ -377,6 +383,21 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
 
 private fun String.singleLine(): String =
     replace(Regex("\\s+"), " ").trim()
+
+/**
+ * Render the transition's [targetGroups][TargetGroup] as a comma-separated label
+ * suitable for the tree row suffix. Parallel groups are wrapped in `(A & B)` to
+ * make the atomic-split semantic visually distinct from a list of alternative
+ * branches.
+ */
+private fun List<TargetGroup>.targetsLabel(): String = joinToString(", ") { group ->
+    when {
+        group.targets.isEmpty() -> ""
+        group.isParallel && group.targets.size >= 2 ->
+            group.targets.joinToString(" & ", prefix = "(", postfix = ")") { it.unquote() }
+        else -> group.targets.joinToString(", ") { it.unquote() }
+    }
+}.replace(Regex(",\\s*,"), ",").trim(',', ' ')
 
 private fun displayName(rawName: String, typeLabel: String, index: Int?): String {
     val unquoted = rawName.unquote()

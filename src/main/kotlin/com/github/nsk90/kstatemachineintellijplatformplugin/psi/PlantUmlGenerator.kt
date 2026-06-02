@@ -59,7 +59,7 @@ object PlantUmlGenerator {
             source.transitions.forEach { t ->
                 appendTransition(source, t, ancestors, ids, unnamedIdx, indent = 0)
             }
-            if (source.kind.isChoice() && source.redirectTarget != null) {
+            if (source.kind.isChoice() && source.redirectTargets.isNotEmpty()) {
                 appendChoiceRedirect(source, ancestors, ids, indent = 0)
             }
         }
@@ -107,9 +107,11 @@ object PlantUmlGenerator {
     ) {
         val pad = "  ".repeat(indent)
         val sourceId = ids[source] ?: return
-        val target = resolveTarget(source.redirectTarget, source, ancestors)
-        val targetText = if (target != null) ids.getValue(target) else sanitizeId(source.redirectTarget!!)
-        appendLine("$pad$sourceId --> $targetText")
+        source.redirectTargets.forEach { targetText ->
+            val resolved = resolveTarget(targetText, source, ancestors)
+            val targetId = if (resolved != null) ids.getValue(resolved) else sanitizeId(targetText)
+            appendLine("$pad$sourceId --> $targetId")
+        }
     }
 
     /** Walk a machine and assign 1-based indices to every unnamed node within it. */
@@ -248,24 +250,55 @@ object PlantUmlGenerator {
     ) {
         val pad = "  ".repeat(indent)
         val sourceId = ids[source] ?: return
-        val target = resolveTarget(transition.targetStateName, source, ancestors)
         val label = transitionLabel(transition, unnamedIdx[transition])
-        val targetId = when {
-            target != null -> ids.getValue(target)
-            transition.targetStateName != null -> sanitizeId(transition.targetStateName)
-            // No target text at all. For DSL forms that legitimately permit
-            // an omitted `targetState` (regular `transition` / `dataTransition`,
-            // or no recognized callee), this is a true internal/self transition
-            // and renders as a self-loop. For lambda-routed forms
-            // (`transitionOn` → `targetState = { … }`, `transitionConditionally`
-            // → `direction = { … }`, `dataTransitionOn`) a missing
-            // `targetStateName` means the parser couldn't statically resolve
-            // the lambda body, NOT that the transition is targetless — emitting
-            // a self-loop there would be a lie. Skip those entirely.
-            transition.callee.supportsTargetlessSemantics() -> sourceId
-            else -> return
+        val labelSuffix = if (label.isEmpty()) "" else " : $label"
+
+        if (transition.targetGroups.isEmpty()) {
+            // No statically-resolvable target. Only emit a self-loop for DSL
+            // forms that legitimately permit an omitted `targetState` (regular
+            // `transition`/`dataTransition`, or no recognized callee). For
+            // lambda-routed forms whose target couldn't be parsed (e.g. a
+            // `transitionConditionally` with no `direction =`, or a
+            // `transitionOn { targetState = { … } }` whose body has no
+            // statically-resolvable identifier) emitting a self-loop would
+            // mislead the reader — skip instead.
+            if (transition.callee.supportsTargetlessSemantics()) {
+                appendLine("$pad$sourceId --> $sourceId$labelSuffix")
+            }
+            return
         }
-        appendLine("$pad$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
+
+        transition.targetGroups.forEachIndexed { groupIndex, group ->
+            when {
+                group.targets.isEmpty() -> Unit // shouldn't happen — parser drops empty groups
+                group.isParallel && group.targets.size >= 2 -> {
+                    // Atomic parallel split: emit a `<<fork>>` pseudo-state plus a
+                    // labeled arrow from source to fork and unlabeled arrows from
+                    // fork to each parallel target. Standard UML state-diagram
+                    // notation; both PlantUML and Mermaid stateDiagram-v2 accept
+                    // the same `state X <<fork>>` syntax verbatim.
+                    val forkId = "fork_${sourceId}_$groupIndex"
+                    appendLine("$pad" + "state $forkId <<fork>>")
+                    appendLine("$pad$sourceId --> $forkId$labelSuffix")
+                    group.targets.forEach { targetText ->
+                        val resolvedId = group.targets.let { _ ->
+                            val resolved = resolveTarget(targetText, source, ancestors)
+                            if (resolved != null) ids.getValue(resolved) else sanitizeId(targetText)
+                        }
+                        appendLine("$pad$forkId --> $resolvedId")
+                    }
+                }
+                else -> {
+                    // Branch outcome (single-target group, or a singleton parallel
+                    // group treated as a regular target — same arrow shape).
+                    group.targets.forEach { targetText ->
+                        val resolved = resolveTarget(targetText, source, ancestors)
+                        val targetId = if (resolved != null) ids.getValue(resolved) else sanitizeId(targetText)
+                        appendLine("$pad$sourceId --> $targetId$labelSuffix")
+                    }
+                }
+            }
+        }
     }
 
     private fun String?.supportsTargetlessSemantics(): Boolean =

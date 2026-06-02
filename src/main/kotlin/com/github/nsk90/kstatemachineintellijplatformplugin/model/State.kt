@@ -36,11 +36,15 @@ open class State(
     /** For data states — raw expression text passed to the `defaultData` argument (`null` when absent). */
     val defaultData: String? = null,
     /**
-     * For `choiceState`-family pseudo-states — the resolved name of the single
-     * target their lambda body redirects to, when the body is simple enough to
-     * resolve (single identifier / state factory call / chain of vals). Null
-     * for non-choice states or for complex/dynamic lambdas like
-     * `{ if (…) A else B }`.
+     * For `choiceState`-family pseudo-states — every resolvable target the lambda
+     * body can return. Multiple entries when the body branches
+     * (`{ if (cond) A else B }`); empty when the body has no statically-extractable
+     * state reference. `choiceState`'s lambda returns a single `State`, so unlike
+     * transitions there is no parallel-split notion here — every entry is one
+     * alternative outcome.
      */
-    val redirectTarget: String? = null,
-)
+    val redirectTargets: List<String> = emptyList(),
+) {
+    /** First redirect target — convenience for callers that only need a single value. */
+    val redirectTarget: String? get() = redirectTargets.firstOrNull()
+}
