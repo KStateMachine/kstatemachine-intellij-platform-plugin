@@ -22,8 +22,10 @@ import org.jetbrains.kotlin.psi.KtIfExpression
 import org.jetbrains.kotlin.psi.KtLambdaExpression
 import org.jetbrains.kotlin.psi.KtNameReferenceExpression
 import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtObjectLiteralExpression
 import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.KtStringTemplateExpression
+import org.jetbrains.kotlin.psi.KtSuperTypeCallEntry
 import org.jetbrains.kotlin.psi.KtWhenExpression
 
 private const val NAME_ARGUMENT = "name"
@@ -367,7 +369,7 @@ private fun extractDirectTargets(lambda: KtLambdaExpression): List<String> {
     fun consider(expr: KtExpression?) {
         if (expr == null) return
         when (expr) {
-            is KtBlockExpression -> consider(expr.statements.lastOrNull() as? KtExpression)
+            is KtBlockExpression -> consider(expr.statements.lastOrNull())
             is KtIfExpression -> {
                 consider(expr.then)
                 consider(expr.`else`)
@@ -379,7 +381,7 @@ private fun extractDirectTargets(lambda: KtLambdaExpression): List<String> {
             }
         }
     }
-    lambda.bodyExpression?.statements?.lastOrNull()?.let { consider(it as? KtExpression) }
+    lambda.bodyExpression?.statements?.lastOrNull()?.let(::consider)
     return result.toList()
 }
 
@@ -433,6 +435,10 @@ private fun resolveStateNameFromExpr(expr: KtExpression?, depth: Int = 0): Strin
                 ?.let { return resolveStateNameFromExpr(it, depth + 1) }
             expr.findObjectDeclarationInFile()
         }
+        // Anonymous-object initializers like `object : DefaultState("first") {}`
+        // — pull the name from the super-type constructor's string argument so
+        // the resolver doesn't fall back to the raw object-literal source.
+        is KtObjectLiteralExpression -> expr.extractObjectLiteralName()
         else -> null
     }
 }
@@ -650,6 +656,13 @@ private fun findArgumentValueWithDefaults(
 // initializer is fed back through simplifiedStateName, so
 //   val state = DefaultState()
 //   addInitialState(state)   →   "DefaultState"
+//
+// Anonymous object literals (`val s = object : DefaultState("first") {}` then
+// `addInitialState(s)`) resolve to the string-literal name passed to the
+// superclass constructor when present, falling back to the superclass type
+// name. Without this branch the resolver returned the entire object-literal
+// source text, which PlantUML can't read as a state name.
+//
 // Capped at a small recursion depth to defend against pathological val chains.
 private fun KtExpression.simplifiedStateName(depth: Int = 0): String {
     if (depth > 5) return text
@@ -657,8 +670,26 @@ private fun KtExpression.simplifiedStateName(depth: Int = 0): String {
         is KtCallExpression -> calleeExpression?.text ?: text
         is KtNameReferenceExpression ->
             resolveLocalInitializer()?.simplifiedStateName(depth + 1) ?: text
+        is KtObjectLiteralExpression -> extractObjectLiteralName() ?: text
         else -> text
     }
+}
+
+/**
+ * `object : SomeState("name") {}` → returns `"\"name\""` (quoted, matching
+ * the string-literal convention used elsewhere for state names).
+ * `object : SomeState() {}` → returns `"SomeState"` (the supertype name).
+ * Anything more exotic (multi-arg constructor, no super-type call) → null,
+ * so callers fall back to whatever else they would have done.
+ */
+private fun KtObjectLiteralExpression.extractObjectLiteralName(): String? {
+    val callEntry = objectDeclaration.superTypeListEntries
+        .filterIsInstance<KtSuperTypeCallEntry>()
+        .firstOrNull()
+        ?: return null
+    val firstArg = callEntry.valueArguments.firstOrNull()?.getArgumentExpression()
+    if (firstArg is KtStringTemplateExpression) return firstArg.text
+    return callEntry.typeReference?.text
 }
 
 /**
