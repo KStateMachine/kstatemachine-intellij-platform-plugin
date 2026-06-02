@@ -31,9 +31,10 @@ repositories {
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
 dependencies {
-    // PlantUML renderer (MIT-licensed redistribution). Bundled into the plugin
-    // so the Diagram tab can render state charts without external Graphviz.
-    implementation("net.sourceforge.plantuml:plantuml-mit:1.2026.5")
+    // PlantUML now ships as TeaVM-compiled JS in src/main/resources/plantuml-js/
+    // (plantuml.js + viz-global.js) and renders via JCEF — same surface as the
+    // Mermaid renderer. The old Java backend (`plantuml-mit`) was dropped because
+    // its Smetana layout engine miscomposed parallel/composite state diagrams.
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {

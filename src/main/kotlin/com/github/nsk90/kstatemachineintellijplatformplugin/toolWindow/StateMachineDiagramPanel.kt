@@ -5,33 +5,22 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.psi.DiagramSyntax
 import com.github.nsk90.kstatemachineintellijplatformplugin.psi.PlantUmlGenerator
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.IdeBorderFactory
 import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
-import net.sourceforge.plantuml.FileFormat
-import net.sourceforge.plantuml.FileFormatOption
-import net.sourceforge.plantuml.SourceStringReader
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.event.ActionListener
-import java.awt.image.BufferedImage
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import javax.imageio.ImageIO
-import javax.swing.ImageIcon
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
-import javax.swing.SwingConstants
 
 private const val SYNTAX_PREF_KEY = "ksm.diagram.syntax"
 private const val PLANTUML_CARD = "plantuml"
@@ -39,21 +28,14 @@ private const val MERMAID_CARD = "mermaid"
 
 class StateMachineDiagramPanel(private val project: Project) {
 
-    // --- PlantUML rendering surface ---
-    private val imageLabel = JBLabel("", SwingConstants.CENTER).apply {
-        verticalAlignment = SwingConstants.TOP
-        horizontalAlignment = SwingConstants.LEFT
-    }
-    private val imageContainer = JPanel(BorderLayout()).apply { add(imageLabel, BorderLayout.CENTER) }
-    private val imageScroll = JBScrollPane(imageContainer)
-
-    // --- Mermaid rendering surface ---
+    // --- Rendering surfaces (both JCEF-backed: TeaVM PlantUML + Viz.js, and Mermaid) ---
+    private val plantUmlRenderer = PlantUmlJsRenderer()
     private val mermaidRenderer = MermaidRenderer()
 
     // --- Image area: card layout to swap between PlantUML and Mermaid ---
     private val imageCards = CardLayout()
     private val imageArea = JPanel(imageCards).apply {
-        add(imageScroll, PLANTUML_CARD)
+        add(plantUmlRenderer.component, PLANTUML_CARD)
         add(mermaidRenderer.component, MERMAID_CARD)
     }
 
@@ -115,15 +97,13 @@ class StateMachineDiagramPanel(private val project: Project) {
     var currentPlantUml: String? = null
         private set
 
-    /** Last rendered PlantUML image (cached for Export). Null when current renderer is Mermaid. */
-    @Volatile
-    var currentImage: BufferedImage? = null
-        private set
-
     /** The renderer currently driving the diagram tab. */
     @Volatile
     var currentSyntax: DiagramSyntax = loadPersistedSyntax()
         private set
+
+    /** SVG markup from the last PlantUML render — used by the Export action. */
+    val currentPlantUmlSvg: String? get() = plantUmlRenderer.currentSvg
 
     /** SVG markup from the last Mermaid render — used by the Export action. */
     val currentMermaidSvg: String? get() = mermaidRenderer.currentSvg
@@ -144,10 +124,9 @@ class StateMachineDiagramPanel(private val project: Project) {
         currentMachines = emptyList()
         rebuildSelector(emptyList())
         currentPlantUml = null
-        currentImage = null
         lastRenderedSource = null
         when (currentSyntax) {
-            DiagramSyntax.PLANTUML -> updateLabel(message)
+            DiagramSyntax.PLANTUML -> plantUmlRenderer.showPlaceholder(message)
             DiagramSyntax.MERMAID -> mermaidRenderer.showPlaceholder(message)
         }
         updateSourceArea("")
@@ -239,55 +218,12 @@ class StateMachineDiagramPanel(private val project: Project) {
         currentPlantUml = source
         updateSourceArea(source)
 
-        if (source == lastRenderedSource && (currentImage != null || currentSyntax == DiagramSyntax.MERMAID)) {
-            return
-        }
+        if (source == lastRenderedSource) return
         lastRenderedSource = source
 
         when (currentSyntax) {
-            DiagramSyntax.PLANTUML -> renderPlantUml(machine, source)
+            DiagramSyntax.PLANTUML -> plantUmlRenderer.render(source, dark)
             DiagramSyntax.MERMAID -> mermaidRenderer.render(source, dark)
-        }
-    }
-
-    private fun renderPlantUml(machine: StateMachine, source: String) {
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val image = try {
-                renderPng(source)
-            } catch (t: Throwable) {
-                thisLogger().warn("PlantUML rendering failed", t)
-                null
-            }
-            ApplicationManager.getApplication().invokeLater {
-                if (image == null) {
-                    currentImage = null
-                    updateLabel("Failed to render diagram — see IDE log for details")
-                } else {
-                    currentImage = image
-                    imageLabel.text = null
-                    imageLabel.icon = ImageIcon(image)
-                    imageLabel.toolTipText = (machineSelector.selectedItem as? MachineEntry)?.label
-                        ?: machine.name.unquoteName()
-                    imageContainer.revalidate()
-                    imageContainer.repaint()
-                }
-            }
-        }
-    }
-
-    private fun renderPng(source: String): BufferedImage? {
-        val reader = SourceStringReader(source)
-        val out = ByteArrayOutputStream()
-        reader.outputImage(out, FileFormatOption(FileFormat.PNG))
-        return ImageIO.read(ByteArrayInputStream(out.toByteArray()))
-    }
-
-    private fun updateLabel(message: String?) {
-        ApplicationManager.getApplication().invokeLater {
-            imageLabel.icon = null
-            imageLabel.text = message
-            imageContainer.revalidate()
-            imageContainer.repaint()
         }
     }
 

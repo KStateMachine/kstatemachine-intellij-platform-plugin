@@ -1,34 +1,22 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow
 
 import com.github.nsk90.kstatemachineintellijplatformplugin.psi.DiagramSyntax
-import com.github.nsk90.kstatemachineintellijplatformplugin.psi.PlantUmlGenerator
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.IdeBorderFactory
 import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
-import net.sourceforge.plantuml.FileFormat
-import net.sourceforge.plantuml.FileFormatOption
-import net.sourceforge.plantuml.SourceStringReader
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.event.ActionListener
-import java.awt.image.BufferedImage
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import javax.imageio.ImageIO
-import javax.swing.ImageIcon
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
-import javax.swing.SwingConstants
 import javax.swing.Timer
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -46,24 +34,17 @@ private const val MERMAID_CARD = "mermaid"
  * Re-renders 500 ms after the last keystroke so typing isn't blocked.
  * Renderer choice and sample template follow the renderer combobox at the
  * top, persisted between sessions via PropertiesComponent.
+ *
+ * Both renderers are now JCEF-based (TeaVM PlantUML + Viz.js, and Mermaid).
  */
 class PlantUmlPlaygroundPanel {
 
-    // --- PlantUML rendering surface ---
-    private val imageLabel = JBLabel("", SwingConstants.CENTER).apply {
-        verticalAlignment = SwingConstants.TOP
-        horizontalAlignment = SwingConstants.LEFT
-    }
-    private val imageContainer = JPanel(BorderLayout()).apply { add(imageLabel, BorderLayout.CENTER) }
-    private val imageScroll = JBScrollPane(imageContainer)
-
-    // --- Mermaid rendering surface ---
+    private val plantUmlRenderer = PlantUmlJsRenderer()
     private val mermaidRenderer = MermaidRenderer()
 
-    // --- Image area: card layout to swap between PlantUML and Mermaid ---
     private val imageCards = CardLayout()
     private val imageArea = JPanel(imageCards).apply {
-        add(imageScroll, PLANTUML_CARD)
+        add(plantUmlRenderer.component, PLANTUML_CARD)
         add(mermaidRenderer.component, MERMAID_CARD)
     }
 
@@ -136,42 +117,19 @@ class PlantUmlPlaygroundPanel {
 
     private fun rerender() {
         val source = sourceArea.text.trim()
+        val dark = !JBColor.isBright()
         if (source.isEmpty()) {
             val msg = "Paste ${currentSyntax.displayName} in the box below — it will render here."
             when (currentSyntax) {
-                DiagramSyntax.PLANTUML -> updateImage(null, msg)
+                DiagramSyntax.PLANTUML -> plantUmlRenderer.showPlaceholder(msg)
                 DiagramSyntax.MERMAID -> mermaidRenderer.showPlaceholder(msg)
             }
             return
         }
         when (currentSyntax) {
-            DiagramSyntax.PLANTUML -> renderPlantUml(source)
-            DiagramSyntax.MERMAID -> mermaidRenderer.render(source, !JBColor.isBright())
+            DiagramSyntax.PLANTUML -> plantUmlRenderer.render(source, dark)
+            DiagramSyntax.MERMAID -> mermaidRenderer.render(source, dark)
         }
-    }
-
-    private fun renderPlantUml(source: String) {
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val image = try {
-                val reader = SourceStringReader(source)
-                val out = ByteArrayOutputStream()
-                reader.outputImage(out, FileFormatOption(FileFormat.PNG))
-                ImageIO.read(ByteArrayInputStream(out.toByteArray()))
-            } catch (t: Throwable) {
-                thisLogger().warn("Playground PlantUML rendering failed", t)
-                null
-            }
-            ApplicationManager.getApplication().invokeLater {
-                updateImage(image, if (image == null) "Render failed — check the PlantUML syntax (see IDE log)" else null)
-            }
-        }
-    }
-
-    private fun updateImage(image: BufferedImage?, message: String?) {
-        imageLabel.text = message
-        imageLabel.icon = image?.let { ImageIcon(it) }
-        imageContainer.revalidate()
-        imageContainer.repaint()
     }
 
     private fun applyCard(syntax: DiagramSyntax) {
@@ -185,18 +143,15 @@ class PlantUmlPlaygroundPanel {
         "${syntax.displayName} input (edit to re-render)"
 
     /**
-     * Initial sample for the chosen [syntax]. For PlantUML it includes the
-     * dark-theme skinparam block (via [PlantUmlGenerator.darkThemeSkinparams])
-     * when the IDE is in a dark theme, so the demo renders in the right
-     * palette out of the box. Mermaid handles theming via its own `%%{init}%%`
-     * directive.
+     * Initial sample for the chosen [syntax]. Dark theme is now applied by
+     * the renderer (PlantUML's TeaVM build takes `{dark: true}`; Mermaid uses
+     * `%%{init: {'theme':'dark'}}%%`), so the PlantUML sample no longer
+     * embeds the old skinparam block.
      */
     private fun buildSampleTemplate(syntax: DiagramSyntax): String = when (syntax) {
         DiagramSyntax.PLANTUML -> buildString {
             appendLine("@startuml")
-            appendLine("!pragma layout smetana")
             appendLine("top to bottom direction")
-            if (!JBColor.isBright()) appendLine(PlantUmlGenerator.darkThemeSkinparams())
             appendLine()
             appendLine("state TrafficLight {")
             appendLine("    [*] --> Red")

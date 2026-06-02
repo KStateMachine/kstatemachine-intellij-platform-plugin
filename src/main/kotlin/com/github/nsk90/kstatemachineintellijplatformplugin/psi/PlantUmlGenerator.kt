@@ -28,6 +28,11 @@ object PlantUmlGenerator {
         darkTheme: Boolean = false,
         syntax: DiagramSyntax = DiagramSyntax.PLANTUML,
     ): String = buildString {
+        // `darkTheme` is now applied by the renderers themselves (the TeaVM
+        // PlantUML build takes a `{dark: true}` option; Mermaid uses its
+        // `%%{init: {'theme':'dark'}}%%` directive). The generator still
+        // forwards the flag to the header for the Mermaid front-matter; the
+        // PlantUML header no longer carries any theme markup.
         appendHeader(syntax, darkTheme)
         appendLine()
 
@@ -66,14 +71,15 @@ object PlantUmlGenerator {
         when (syntax) {
             DiagramSyntax.PLANTUML -> {
                 appendLine("@startuml")
-                appendLine("!pragma layout smetana")
                 // Force vertical layout — the plugin's tool window is taller
                 // than it is wide, so left-to-right diagrams overflow
                 // horizontally. `top to bottom direction` is PlantUML's
-                // directive for this.
+                // directive for this. No `!pragma layout` directive — the
+                // TeaVM build uses Viz.js/Graphviz dot by default, which is
+                // what we want (Smetana was the source of the parallel-state
+                // bugs that drove this whole rework).
                 appendLine("top to bottom direction")
                 appendLine("hide empty description")
-                if (darkTheme) appendLine(darkThemeSkinparams())
             }
             DiagramSyntax.MERMAID -> {
                 // Mermaid's init directive must come BEFORE the diagram type
@@ -137,35 +143,6 @@ object PlantUmlGenerator {
         }
         walk(machine)
     }
-
-    /**
-     * PlantUML skinparam block tuned to roughly match Darcula's editor palette
-     * so the rendered PNG doesn't look out of place inside the dark IDE.
-     * Public so [PlantUmlPlaygroundPanel] can reuse it when seeding its initial
-     * sample template — single source of truth for the dark-PlantUML styling.
-     *
-     * Mermaid does NOT use this; the Mermaid path emits `%%{init: {'theme':'dark'}}%%`
-     * instead (handled in [appendHeader]).
-     */
-    fun darkThemeSkinparams(): String = buildString {
-        appendLine("skinparam backgroundColor #2B2B2B")
-        appendLine("skinparam DefaultFontColor #BBBBBB")
-        appendLine("skinparam ArrowColor #9C9C9C")
-        appendLine("skinparam ArrowFontColor #BBBBBB")
-        appendLine("skinparam state {")
-        appendLine("  BackgroundColor #3C3F41")
-        appendLine("  BorderColor #9C9C9C")
-        appendLine("  BorderThickness 2")
-        appendLine("  FontColor #DDDDDD")
-        appendLine("  StartColor #DDDDDD")
-        appendLine("  EndColor #DDDDDD")
-        appendLine("}")
-        appendLine("skinparam note {")
-        appendLine("  BackgroundColor #4C5052")
-        appendLine("  BorderColor #9C9C9C")
-        appendLine("  FontColor #BBBBBB")
-        appendLine("}")
-    }.trimEnd()
 
     private fun isUnnamed(rawName: String): Boolean {
         val unquoted = rawName.trim('"')

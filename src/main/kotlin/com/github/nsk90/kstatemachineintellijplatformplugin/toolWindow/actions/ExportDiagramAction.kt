@@ -14,38 +14,35 @@ import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.ui.Messages
-import net.sourceforge.plantuml.FileFormat
-import net.sourceforge.plantuml.FileFormatOption
-import net.sourceforge.plantuml.SourceStringReader
 import java.io.File
-import java.io.FileOutputStream
 
 class ExportDiagramAction : AnAction(
     "Export Diagram",
-    "Save the rendered state diagram as PNG or SVG",
+    "Save the rendered state diagram as SVG",
     AllIcons.ToolbarDecorator.Export,
 ) {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val panel = project.service<StateMachineViewService>().diagramPanel ?: return
-        val source = panel.currentPlantUml ?: return
+        if (panel.currentPlantUml == null) return
 
         val descriptor = FileSaverDescriptor(
             "Export State Diagram",
-            "Choose where to save the diagram (.png or .svg) — file format taken from the extension you type",
+            "Save the diagram as .svg — both renderers produce SVG output",
         )
         val wrapper = FileChooserFactory.getInstance()
             .createSaveFileDialog(descriptor, project)
-            .save(project.guessProjectDir(), defaultFilename(panel.currentSyntax))
+            .save(project.guessProjectDir(), "state-diagram.svg")
             ?: return
 
         val target = wrapper.file
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                when (panel.currentSyntax) {
-                    DiagramSyntax.PLANTUML -> exportPlantUml(target, source)
-                    DiagramSyntax.MERMAID -> exportMermaid(project, target, panel.currentMermaidSvg)
+                val svg = when (panel.currentSyntax) {
+                    DiagramSyntax.PLANTUML -> panel.currentPlantUmlSvg
+                    DiagramSyntax.MERMAID -> panel.currentMermaidSvg
                 }
+                exportSvg(project, target, svg)
                 ApplicationManager.getApplication().invokeLater {
                     Messages.showInfoMessage(project, "Saved to ${target.absolutePath}", "Export Diagram")
                 }
@@ -58,40 +55,23 @@ class ExportDiagramAction : AnAction(
         }
     }
 
-    private fun exportPlantUml(target: File, source: String) {
-        val format = when (target.extension.lowercase()) {
-            "svg" -> FileFormat.SVG
-            else -> FileFormat.PNG
-        }
-        FileOutputStream(target).use { out ->
-            SourceStringReader(source).outputImage(out, FileFormatOption(format))
-        }
-    }
-
-    private fun exportMermaid(project: Project, target: File, svg: String?) {
-        // Mermaid currently exports as SVG — that's what the in-browser
-        // rendering already produced. PNG-from-Mermaid would need an SVG→PNG
-        // rasterizer (Apache Batik, ~3 MB additional dep) and is intentionally
-        // out of scope for this iteration.
+    private fun exportSvg(project: Project, target: File, svg: String?) {
+        // PNG-from-JCEF would need viewport screenshot plumbing — out of scope
+        // since the user explicitly chose SVG-only when we dropped plantuml-mit.
         if (target.extension.lowercase() != "svg") {
             ApplicationManager.getApplication().invokeLater {
                 Messages.showWarningDialog(
                     project,
-                    "Mermaid export only supports SVG in this version. " +
-                        "Save with a .svg extension, or switch the renderer to PlantUML for PNG output.",
+                    "Diagram export only supports SVG in this version. " +
+                        "Save with a .svg extension.",
                     "Export Diagram",
                 )
             }
-            throw IllegalArgumentException("Unsupported format for Mermaid: ${target.extension}")
+            throw IllegalArgumentException("Unsupported format: ${target.extension}")
         }
         val markup = svg
-            ?: throw IllegalStateException("No rendered Mermaid SVG available yet — wait for the diagram to finish loading")
+            ?: throw IllegalStateException("No rendered SVG available yet — wait for the diagram to finish loading")
         target.writeText(markup)
-    }
-
-    private fun defaultFilename(syntax: DiagramSyntax): String = when (syntax) {
-        DiagramSyntax.PLANTUML -> "state-diagram.png"
-        DiagramSyntax.MERMAID -> "state-diagram.svg"
     }
 
     override fun update(e: AnActionEvent) {
