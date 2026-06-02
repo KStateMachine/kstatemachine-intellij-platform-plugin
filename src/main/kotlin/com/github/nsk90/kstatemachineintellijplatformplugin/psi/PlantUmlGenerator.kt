@@ -270,6 +270,12 @@ object PlantUmlGenerator {
 
         transition.targetGroups.forEachIndexed { groupIndex, group ->
             when {
+                group.isSelfLoop -> {
+                    // `transitionConditionally { direction = { stay() } }` —
+                    // fires the transition but stays in the source state. Drawn
+                    // as a self-loop so the user can see the transition exists.
+                    appendLine("$pad$sourceId --> $sourceId$labelSuffix")
+                }
                 group.targets.isEmpty() -> Unit // shouldn't happen — parser drops empty groups
                 group.isParallel && group.targets.size >= 2 -> {
                     // Atomic parallel split: emit a `<<fork>>` pseudo-state plus a

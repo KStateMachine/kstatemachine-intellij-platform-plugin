@@ -392,6 +392,7 @@ private fun String.singleLine(): String =
  */
 private fun List<TargetGroup>.targetsLabel(): String = joinToString(", ") { group ->
     when {
+        group.isSelfLoop -> "(stay)"
         group.targets.isEmpty() -> ""
         group.isParallel && group.targets.size >= 2 ->
             group.targets.joinToString(" & ", prefix = "(", postfix = ")") { it.unquote() }

@@ -39,6 +39,8 @@ private const val DIRECTION_PROPERTY = "direction"
 private const val TRANSITION_CONDITIONALLY_CALLEE = "transitionConditionally"
 private const val TARGET_STATE_CALL = "targetState"
 private const val TARGET_PARALLEL_STATES_CALL = "targetParallelStates"
+private const val STAY_CALL = "stay"
+private const val NO_TRANSITION_CALL = "noTransition"
 
 fun interface Output {
     fun write(message: String)
@@ -336,18 +338,36 @@ private fun extractConditionalGroups(directionLambda: KtLambdaExpression): List<
         for (child in element.children) {
             if (child is KtLambdaExpression) continue
             if (child is KtCallExpression) {
-                val callee = child.calleeExpression?.text
-                if (callee == TARGET_STATE_CALL || callee == TARGET_PARALLEL_STATES_CALL) {
-                    val args = child.valueArguments
-                        .mapNotNull { it.getArgumentExpression() }
-                        .mapNotNull { resolveStateNameFromExpr(it) ?: it.targetFallbackText() }
-                        .distinct()
-                    if (args.isNotEmpty()) {
-                        groups += TargetGroup(
-                            targets = args,
-                            isParallel = callee == TARGET_PARALLEL_STATES_CALL,
-                        )
+                when (child.calleeExpression?.text) {
+                    TARGET_STATE_CALL, TARGET_PARALLEL_STATES_CALL -> {
+                        val callee = child.calleeExpression?.text
+                        val args = child.valueArguments
+                            .mapNotNull { it.getArgumentExpression() }
+                            .mapNotNull { resolveStateNameFromExpr(it) ?: it.targetFallbackText() }
+                            .distinct()
+                        if (args.isNotEmpty()) {
+                            groups += TargetGroup(
+                                targets = args,
+                                isParallel = callee == TARGET_PARALLEL_STATES_CALL,
+                            )
+                        }
                     }
+                    STAY_CALL -> {
+                        // `stay()` fires the transition but keeps the source state
+                        // active — render as a self-loop. Modelled as an empty,
+                        // non-parallel group flagged with isSelfLoop so the
+                        // generator can resolve the target to the source at
+                        // render time (we don't know the source's id here).
+                        groups += TargetGroup(targets = emptyList(), isParallel = false, isSelfLoop = true)
+                    }
+                    NO_TRANSITION_CALL -> {
+                        // Explicit no-op outcome — contributes no group on
+                        // purpose. The diagram skips emission when all groups
+                        // are absent / empty, matching the runtime semantics.
+                    }
+                    // Other call shapes (user helpers, conditional builders
+                    // we don't recognize) intentionally fall through and are
+                    // ignored; the parent walk will descend into their args.
                 }
             }
             walk(child)

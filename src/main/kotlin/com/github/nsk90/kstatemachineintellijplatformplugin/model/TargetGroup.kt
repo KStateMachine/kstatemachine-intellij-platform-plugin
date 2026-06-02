@@ -9,6 +9,12 @@ package com.github.nsk90.kstatemachineintellijplatformplugin.model
  *   `targetParallelStates(A, B, …)` — at runtime all listed states become
  *   active simultaneously. The diagram surfaces this with a `<<fork>>` pseudo-
  *   state to keep the semantics distinct from a list of alternative branches.
+ * - `isSelfLoop = true`, [targets] empty: produced by `transitionConditionally`'s
+ *   `direction = { stay() }` outcome. The transition fires (listeners run) but
+ *   the active state doesn't change — rendered as a self-loop arrow.
+ *   `noTransition()` does NOT produce a group at all; it's an explicit no-op
+ *   and the renderer correctly skips drawing an arrow when target groups are
+ *   empty.
  *
  * Each [targets] entry is a state-name string in the same shape the rest of
  * the pipeline already consumes (quoted string literal, plain identifier, or
@@ -17,4 +23,5 @@ package com.github.nsk90.kstatemachineintellijplatformplugin.model
 data class TargetGroup(
     val targets: List<String>,
     val isParallel: Boolean,
+    val isSelfLoop: Boolean = false,
 )
