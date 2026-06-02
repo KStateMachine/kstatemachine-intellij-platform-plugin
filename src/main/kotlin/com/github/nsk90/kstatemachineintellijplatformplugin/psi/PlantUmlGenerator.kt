@@ -207,7 +207,17 @@ object PlantUmlGenerator {
             state.states.forEachIndexed { idx, child ->
                 if (idx > 0) appendLine("$pad  --")
                 appendStateDecl(child, ids, unnamedIdx, syntax, regionAncestors, indent + 1)
-                emitSubtreeTransitions(child, regionAncestors, ids, unnamedIdx, indent + 1)
+                // Emit the region's *own* outgoing arrows at the parallel
+                // parent's body indent — the correct scope for transitions
+                // whose source is the region root itself. Deeper arrows are
+                // handled inside the recursive appendStateDecl call above,
+                // at the indent of their own source state's enclosing block.
+                child.transitions.forEach { t ->
+                    appendTransition(child, t, regionAncestors, ids, unnamedIdx, indent + 1)
+                }
+                if (child.kind.isChoice() && child.redirectTarget != null) {
+                    appendChoiceRedirect(child, regionAncestors, ids, indent + 1)
+                }
                 // Mermaid requires an explicit `[*] --> region` arrow inside
                 // each parallel region's slot — without it the renderer fails
                 // to draw the region. PlantUML doesn't tolerate this construct
@@ -222,7 +232,23 @@ object PlantUmlGenerator {
         } else {
             appendLine("$pad$header {")
             val innerAncestors = listOf(state) + parentAncestors
-            state.states.forEach { appendStateDecl(it, ids, unnamedIdx, syntax, innerAncestors, indent + 1) }
+            // Inside a parallel ancestor scope we MUST emit each child's
+            // outgoing arrows in the lexical block where the child is
+            // declared — otherwise PlantUML/Smetana can't decide which region
+            // owns the arrow and the parse fails. Outside a parallel scope
+            // the global pass at the bottom of render() handles them.
+            val insideParallel = parentAncestors.any { it.isParallel }
+            state.states.forEach { child ->
+                appendStateDecl(child, ids, unnamedIdx, syntax, innerAncestors, indent + 1)
+                if (insideParallel) {
+                    child.transitions.forEach { t ->
+                        appendTransition(child, t, innerAncestors, ids, unnamedIdx, indent + 1)
+                    }
+                    if (child.kind.isChoice() && child.redirectTarget != null) {
+                        appendChoiceRedirect(child, innerAncestors, ids, indent + 1)
+                    }
+                }
+            }
             state.states.firstOrNull { it.kind.isInitial() }?.let {
                 appendLine("$pad  [*] --> ${ids[it]}")
             }
@@ -233,26 +259,6 @@ object PlantUmlGenerator {
             }
             appendLine("$pad}")
         }
-    }
-
-    private fun StringBuilder.emitSubtreeTransitions(
-        root: State,
-        rootAncestors: List<State>,
-        ids: Map<State, String>,
-        unnamedIdx: java.util.IdentityHashMap<Any, Int>,
-        indent: Int,
-    ) {
-        fun walk(node: State, ancestors: List<State>) {
-            node.transitions.forEach { t ->
-                appendTransition(node, t, ancestors, ids, unnamedIdx, indent)
-            }
-            if (node.kind.isChoice() && node.redirectTarget != null) {
-                appendChoiceRedirect(node, ancestors, ids, indent)
-            }
-            val nestedAncestors = listOf(node) + ancestors
-            node.states.forEach { walk(it, nestedAncestors) }
-        }
-        walk(root, rootAncestors)
     }
 
     private fun StringBuilder.appendTransition(
