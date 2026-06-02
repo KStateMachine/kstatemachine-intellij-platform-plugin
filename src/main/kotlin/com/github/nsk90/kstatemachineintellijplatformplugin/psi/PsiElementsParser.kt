@@ -1,5 +1,6 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.Guard
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.State
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateKind
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
@@ -60,13 +61,25 @@ class PsiElementsParser(private val output: Output) {
                 KStateMachineCalls.Kind.TRANSITION -> {
                     val transitionName = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
                     val calleeText = call.calleeExpression?.text
+                    val guardEntry = call.findLambdaAssignmentEntry(GUARD_PROPERTY)
+                    val guardRhs = guardEntry?.right
                     transitions += Transition(
                         name = transitionName,
                         pointer = pointerManager.createSmartPsiElementPointer(call),
                         targetStateName = call.findTargetStateName(),
                         eventType = call.typeArguments.firstOrNull()?.text,
                         callee = calleeText,
-                        isGuarded = call.findLambdaAssignment(GUARD_PROPERTY) != null,
+                        isGuarded = guardEntry != null,
+                        guard = if (guardEntry != null && guardRhs != null) {
+                            // Point at the whole `guard = …` binary expression
+                            // so reverse navigation triggers from a caret on
+                            // either the `guard` identifier, the `=`, or the
+                            // lambda body. Display text stays the RHS only.
+                            Guard(
+                                text = guardRhs.text,
+                                pointer = pointerManager.createSmartPsiElementPointer(guardEntry),
+                            )
+                        } else null,
                         // dataTransition<E, D> / dataTransitionOn<E, D> — D is the 2nd type arg.
                         dataType = if (calleeText in DATA_TRANSITION_CALLEES)
                             call.typeArguments.getOrNull(1)?.text else null,
@@ -371,12 +384,16 @@ private fun KtNameReferenceExpression.findObjectDeclarationInFile(): String? {
 
 /**
  * Walk the call's trailing-lambda body looking for `propertyName = <expr>`
- * (a simple-name assignment). Used for both `targetState = …` and `guard = …`.
- * Skips nested lambdas so we stay in the immediate transition scope.
+ * (a simple-name assignment) and return the whole binary expression. Callers
+ * needing only the right-hand text use [findLambdaAssignment]; callers
+ * needing to navigate to the assignment use the returned element directly
+ * (its range covers both the property name and the right-hand expression,
+ * so a caret on either side resolves to the same node). Skips nested lambdas
+ * so we stay in the immediate transition scope.
  */
-private fun KtCallExpression.findLambdaAssignment(propertyName: String): String? {
+private fun KtCallExpression.findLambdaAssignmentEntry(propertyName: String): KtBinaryExpression? {
     val body = dslLambda()?.bodyExpression ?: return null
-    var found: String? = null
+    var found: KtBinaryExpression? = null
     fun walk(element: PsiElement) {
         if (found != null) return
         for (child in element.children) {
@@ -385,7 +402,7 @@ private fun KtCallExpression.findLambdaAssignment(propertyName: String): String?
                 && child.operationToken == KtTokens.EQ
                 && child.left?.text == propertyName
             ) {
-                found = child.right?.text
+                found = child
                 return
             }
             walk(child)
@@ -394,6 +411,9 @@ private fun KtCallExpression.findLambdaAssignment(propertyName: String): String?
     walk(body)
     return found
 }
+
+private fun KtCallExpression.findLambdaAssignment(propertyName: String): String? =
+    findLambdaAssignmentEntry(propertyName)?.right?.text
 
 /**
  * For `choiceState`-family calls, look at the trailing lambda body. If it's a

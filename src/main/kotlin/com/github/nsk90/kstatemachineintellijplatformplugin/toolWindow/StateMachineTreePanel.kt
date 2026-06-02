@@ -1,5 +1,6 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow
 
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.Guard
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.State
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateKind
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
@@ -9,12 +10,12 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
+import com.intellij.psi.PsiElement
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
-import org.jetbrains.kotlin.psi.KtCallExpression
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.IdentityHashMap
@@ -238,7 +239,14 @@ class StateMachineTreePanel(private val project: Project) {
     private fun buildNode(state: State): DefaultMutableTreeNode {
         val node = DefaultMutableTreeNode(state)
         state.states.forEach { node.add(buildNode(it)) }
-        state.transitions.forEach { node.add(DefaultMutableTreeNode(it)) }
+        state.transitions.forEach { transition ->
+            val transitionNode = DefaultMutableTreeNode(transition)
+            node.add(transitionNode)
+            // Surface the guard expression as a navigable child node so the
+            // user can see what the transition is gated on and jump directly
+            // to the guard's source — same pattern as state/transition nodes.
+            transition.guard?.let { transitionNode.add(DefaultMutableTreeNode(it)) }
+        }
         return node
     }
 
@@ -250,7 +258,7 @@ class StateMachineTreePanel(private val project: Project) {
         }
     }
 
-    private fun navigateToPointer(pointer: SmartPsiElementPointer<KtCallExpression>) {
+    private fun navigateToPointer(pointer: SmartPsiElementPointer<out PsiElement>) {
         val element = pointer.element ?: return
         val vf = pointer.virtualFile ?: return
         // requestFocus = false → the editor opens / scrolls to the location, but
@@ -277,10 +285,11 @@ class StateMachineTreePanel(private val project: Project) {
     }
 }
 
-private fun DefaultMutableTreeNode.pointer(): SmartPsiElementPointer<KtCallExpression>? =
+private fun DefaultMutableTreeNode.pointer(): SmartPsiElementPointer<out PsiElement>? =
     when (val data = userObject) {
         is State -> data.pointer
         is Transition -> data.pointer
+        is Guard -> data.pointer
         else -> null
     }
 
@@ -352,10 +361,22 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
                     append(suffix, SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 }
             }
+            is Guard -> {
+                icon = AllIcons.Nodes.Padlock
+                append("guard ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                // Compact one-liner: the raw expression source can contain
+                // line breaks (lambda body across lines). Collapse them so
+                // the tree row stays readable; clicking the node jumps to
+                // the real, fully-formatted expression in the editor.
+                append(data.text.singleLine())
+            }
             else -> append(node.toString())
         }
     }
 }
+
+private fun String.singleLine(): String =
+    replace(Regex("\\s+"), " ").trim()
 
 private fun displayName(rawName: String, typeLabel: String, index: Int?): String {
     val unquoted = rawName.unquote()
