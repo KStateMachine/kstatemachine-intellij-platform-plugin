@@ -250,25 +250,32 @@ object PlantUmlGenerator {
         val sourceId = ids[source] ?: return
         val target = resolveTarget(transition.targetStateName, source, ancestors)
         val label = transitionLabel(transition, unnamedIdx[transition])
-        // Always emit a real transition arrow — no more `note right of …`
-        // fallbacks. PlantUML / Mermaid accept arrows to identifiers they
-        // haven't seen declared (they show up as implicit nodes), so even
-        // an unresolved target like `{ if (…) A else B }` gets rendered as
-        // a transition to a sanitized synthetic node rather than vanishing
-        // into a side-note. Targetless / internal stays a self-loop.
         val targetId = when {
             target != null -> ids.getValue(target)
             transition.targetStateName != null -> sanitizeId(transition.targetStateName)
-            else -> sourceId   // self-loop for internal
+            // No target text at all. For DSL forms that legitimately permit
+            // an omitted `targetState` (regular `transition` / `dataTransition`,
+            // or no recognized callee), this is a true internal/self transition
+            // and renders as a self-loop. For lambda-routed forms
+            // (`transitionOn` → `targetState = { … }`, `transitionConditionally`
+            // → `direction = { … }`, `dataTransitionOn`) a missing
+            // `targetStateName` means the parser couldn't statically resolve
+            // the lambda body, NOT that the transition is targetless — emitting
+            // a self-loop there would be a lie. Skip those entirely.
+            transition.callee.supportsTargetlessSemantics() -> sourceId
+            else -> return
         }
         appendLine("$pad$sourceId --> $targetId${if (label.isEmpty()) "" else " : $label"}")
     }
+
+    private fun String?.supportsTargetlessSemantics(): Boolean =
+        this == null || this == "transition" || this == "dataTransition"
 
     private fun transitionLabel(t: Transition, index: Int?): String {
         val explicit = t.name.takeIf { it.isNotBlank() && it != "<unnamed>" && it != "null" }
         return when {
             explicit != null -> escape(explicit)
-            t.eventType != null -> "on ${escape(t.eventType)}"
+            t.eventType != null -> escape(t.eventType)
             else -> if (index != null) "Transition $index" else "Transition"
         }
     }
