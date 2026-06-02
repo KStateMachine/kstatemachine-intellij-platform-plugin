@@ -6,6 +6,8 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.psi.PlantUmlGenerato
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.IdeBorderFactory
 import com.intellij.ui.JBColor
@@ -35,7 +37,7 @@ private const val SYNTAX_PREF_KEY = "ksm.diagram.syntax"
 private const val PLANTUML_CARD = "plantuml"
 private const val MERMAID_CARD = "mermaid"
 
-class StateMachineDiagramPanel {
+class StateMachineDiagramPanel(private val project: Project) {
 
     // --- PlantUML rendering surface ---
     private val imageLabel = JBLabel("", SwingConstants.CENTER).apply {
@@ -73,7 +75,17 @@ class StateMachineDiagramPanel {
     // --- Top toolbar ---
     private val machineSelector = ComboBox<MachineEntry>()
     private val syntaxSelector = ComboBox(DiagramSyntax.values())
-    private val machineSelectorListener = ActionListener { renderSelected() }
+
+    // True while we're mutating the dropdown in response to a tree selection
+    // (which already navigated the editor). Stops the dropdown listener from
+    // navigating a second time and stealing focus from whatever the tree did.
+    @Volatile
+    private var suppressNavigationOnSelect = false
+
+    private val machineSelectorListener = ActionListener {
+        renderSelected()
+        if (!suppressNavigationOnSelect) navigateToSelectedMachine()
+    }
     private val syntaxSelectorListener = ActionListener {
         val newSyntax = syntaxSelector.selectedItem as? DiagramSyntax ?: return@ActionListener
         if (newSyntax == currentSyntax) return@ActionListener
@@ -164,7 +176,27 @@ class StateMachineDiagramPanel {
         val itemIdx = (0 until machineSelector.itemCount).firstOrNull {
             machineSelector.getItemAt(it).index == targetIdx
         } ?: return
-        machineSelector.selectedIndex = itemIdx
+        suppressNavigationOnSelect = true
+        try {
+            machineSelector.selectedIndex = itemIdx
+        } finally {
+            suppressNavigationOnSelect = false
+        }
+    }
+
+    /**
+     * Mirror what the tree does on selection: open the source file and place the
+     * caret on the machine's `createStateMachine(...)` call. `requestFocus = false`
+     * keeps focus on the diagram tab so the dropdown stays usable for arrow-key
+     * cycling — same UX pattern the tree uses.
+     */
+    private fun navigateToSelectedMachine() {
+        val selected = (machineSelector.selectedItem as? MachineEntry)?.index ?: return
+        val machine = currentMachines.getOrNull(selected) ?: return
+        val pointer = machine.pointer ?: return
+        val element = pointer.element ?: return
+        val vf = pointer.virtualFile ?: return
+        OpenFileDescriptor(project, vf, element.textRange.startOffset).navigate(false)
     }
 
     private fun rebuildSelector(machines: List<StateMachine>) {

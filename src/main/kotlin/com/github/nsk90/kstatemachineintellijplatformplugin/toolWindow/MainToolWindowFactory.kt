@@ -51,7 +51,7 @@ class MainToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         this.project = project
         treePanel = StateMachineTreePanel(project)
-        diagramPanel = StateMachineDiagramPanel()
+        diagramPanel = StateMachineDiagramPanel(project)
         playgroundPanel = PlantUmlPlaygroundPanel()
         project.service<StateMachineViewService>().bind(treePanel, diagramPanel)
 
