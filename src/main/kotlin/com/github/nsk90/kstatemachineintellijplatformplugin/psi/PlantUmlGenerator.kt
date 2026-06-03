@@ -395,7 +395,12 @@ object PlantUmlGenerator {
             bindingName?.lowercase() == cleanedName
 
     private fun assignIds(state: State, out: MutableMap<State, String>, taken: MutableSet<String>) {
-        val base = sanitizeId(state.name)
+        // Prefer the binding variable name as the id base when the state has
+        // no explicit DSL name. This keeps the diagram source readable and
+        // close to what the user wrote (`val choiceState = …` → id
+        // `choiceState`) instead of dropping back to the opaque sanitized
+        // `unnamed` / `unnamed_2` / … sequence.
+        val base = sanitizeId(state.preferredLabel() ?: state.name)
         var id = base
         var i = 2
         while (id in taken) {
@@ -423,12 +428,21 @@ object PlantUmlGenerator {
         text.trim('"').replace("\"", "\\\"").replace("\n", " ")
 
     private fun State.displayName(index: Int?): String {
+        preferredLabel()?.let { return it }
+        val typeLabel = if (this is StateMachine) "StateMachine" else "State"
+        return if (index != null) "$typeLabel $index" else typeLabel
+    }
+
+    /**
+     * The label the user is most likely to recognise: the explicit DSL name
+     * when one was given, otherwise the binding variable name
+     * (`val foo = state(…)` → `"foo"`). Null when the state has neither —
+     * callers fall back to the indexed `State #N` / `StateMachine #N` form.
+     */
+    private fun State.preferredLabel(): String? {
         val raw = name.trim('"')
-        if (raw.isBlank() || raw == "null" || raw == "<unnamed>") {
-            val typeLabel = if (this is StateMachine) "StateMachine" else "State"
-            return if (index != null) "$typeLabel $index" else typeLabel
-        }
-        return raw
+        if (raw.isNotBlank() && raw != "null" && raw != "<unnamed>") return raw
+        return bindingName?.takeIf { it.isNotBlank() }
     }
 
     private fun forEachStateWithAncestors(

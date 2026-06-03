@@ -315,14 +315,14 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
         when (val data = node.userObject) {
             is StateMachine -> {
                 icon = AllIcons.Nodes.Module
-                val resolved = data.name.unquote()
-                if (resolved.isBlank() || resolved == "null" || resolved == "<unnamed>") {
-                    // Unnamed machine — show just "StateMachine" plus an index
-                    // when there are multiple unnamed machines in the file.
-                    append(indexedTypeLabel("StateMachine", unnamedIndices[data]))
-                } else {
+                val preferred = data.preferredLabel()
+                if (preferred != null) {
                     append("StateMachine ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                    append(resolved)
+                    append(preferred)
+                } else {
+                    // No explicit DSL name and no variable binding — fall back
+                    // to the indexed `StateMachine #N` form.
+                    append(indexedTypeLabel("StateMachine", unnamedIndices[data]))
                 }
                 // Top-level machines live at tree depth 1 (direct children of the
                 // invisible root). Anything deeper is a *nested* machine — flag it
@@ -335,7 +335,7 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
             }
             is State -> {
                 icon = data.kind.icon()
-                append(displayName(data.name, "State", unnamedIndices[data]))
+                append(data.preferredLabel() ?: indexedTypeLabel("State", unnamedIndices[data]))
                 val tag = data.kind.label()
                 if (tag != null) append("  $tag", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 if (data.isParallel) append("  (parallel)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
@@ -403,11 +403,17 @@ private fun List<TargetGroup>.targetsLabel(): String = joinToString(", ") { grou
     }
 }.replace(Regex(",\\s*,"), ",").trim(',', ' ')
 
-private fun displayName(rawName: String, typeLabel: String, index: Int?): String {
-    val unquoted = rawName.unquote()
-    return if (unquoted.isBlank() || unquoted == "null" || unquoted == "<unnamed>") {
-        indexedTypeLabel(typeLabel, index)
-    } else unquoted
+/**
+ * Label the user is most likely to recognise: the explicit DSL name when one
+ * was given, otherwise the binding variable name (`val foo = state(…)` →
+ * `"foo"`). Null when the state has neither — callers fall back to the
+ * indexed `State #N` / `StateMachine #N` form. Mirrors the same helper on
+ * the generator side so both views agree.
+ */
+private fun State.preferredLabel(): String? {
+    val unquoted = name.unquote()
+    if (unquoted.isNotBlank() && unquoted != "null" && unquoted != "<unnamed>") return unquoted
+    return bindingName?.takeIf { it.isNotBlank() }
 }
 
 private fun Transition.transitionLabel(index: Int?): String {
