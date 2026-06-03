@@ -26,6 +26,7 @@ import org.jetbrains.kotlin.psi.KtObjectLiteralExpression
 import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.KtStringTemplateExpression
 import org.jetbrains.kotlin.psi.KtSuperTypeCallEntry
+import org.jetbrains.kotlin.psi.KtThisExpression
 import org.jetbrains.kotlin.psi.KtWhenExpression
 
 private const val NAME_ARGUMENT = "name"
@@ -61,14 +62,74 @@ class PsiElementsParser(private val output: Output) {
     private fun parseLambdaChildren(
         lambda: KtLambdaExpression?,
         pointerManager: SmartPointerManager,
+        extraLambdas: List<KtLambdaExpression> = emptyList(),
     ): Pair<List<State>, List<Transition>> {
-        if (lambda == null) return emptyList<State>() to emptyList()
+        if (lambda == null && extraLambdas.isEmpty()) return emptyList<State>() to emptyList()
         val states = mutableListOf<State>()
         val transitions = mutableListOf<Transition>()
-        lambda.directCallExpressions().forEach { call ->
+
+        // Calls drawn from BOTH the primary lambda and any extension lambdas
+        // the caller folded in. Extension lambdas come from the `stateVar { … }`
+        // operator-invoke configuration pattern — see comment near the
+        // extension-collection block below.
+        val allCalls = buildList {
+            lambda?.directCallExpressions()?.let { addAll(it) }
+            extraLambdas.forEach { addAll(it.directCallExpressions()) }
+        }
+
+        // Pre-pass 1: identify every state declaration in this scope that's
+        // bound to a Kotlin variable (`val state1 = initialState("…")`). We
+        // need this map to recognise later `state1 { … }` calls as extensions
+        // of an already-known state rather than mysterious unknown invokes.
+        val stateBindings = mutableMapOf<String, KtCallExpression>()
+        allCalls.forEach { call ->
+            val kind = KStateMachineCalls.matchKind(call)
+            if (kind == KStateMachineCalls.Kind.STATE
+                || kind == KStateMachineCalls.Kind.ADD_STATE
+                || kind == KStateMachineCalls.Kind.MACHINE
+            ) {
+                call.bindingNameFromAssignment()?.let { stateBindings[it] = call }
+            }
+        }
+
+        // Pre-pass 2: collect `stateVar { … }` extension invocations whose
+        // callee matches a binding we just found. KStateMachine exposes a
+        // `State.invoke(builder)` operator for configuring a state after its
+        // declaration, used to split `val s = initialState("S")` from
+        // `s { transition<E>(…) }`. Their lambda bodies must be folded into
+        // the matching state's primary body so the transitions land on the
+        // right state instead of being attributed to the surrounding scope.
+        val extensionsByBinding = mutableMapOf<String, MutableList<KtLambdaExpression>>()
+        allCalls.forEach { call ->
+            val callee = call.calleeExpression?.text ?: return@forEach
+            if (KStateMachineCalls.matchKind(call) == null && callee in stateBindings) {
+                call.dslLambda()?.let {
+                    extensionsByBinding.getOrPut(callee) { mutableListOf() } += it
+                }
+            }
+        }
+
+        // Main pass: produce model objects, skipping extension invocations
+        // (their content has been folded into the corresponding declaration).
+        allCalls.forEach { call ->
+            val callee = call.calleeExpression?.text
+            if (callee != null
+                && KStateMachineCalls.matchKind(call) == null
+                && callee in stateBindings
+            ) {
+                return@forEach
+            }
             when (KStateMachineCalls.matchKind(call)) {
-                KStateMachineCalls.Kind.STATE -> states += parseState(call, pointerManager)
-                KStateMachineCalls.Kind.ADD_STATE -> states += parseAddState(call, pointerManager)
+                KStateMachineCalls.Kind.STATE -> {
+                    val extras = call.bindingNameFromAssignment()
+                        ?.let { extensionsByBinding[it] }.orEmpty()
+                    states += parseState(call, pointerManager, extras)
+                }
+                KStateMachineCalls.Kind.ADD_STATE -> {
+                    val extras = call.bindingNameFromAssignment()
+                        ?.let { extensionsByBinding[it] }.orEmpty()
+                    states += parseAddState(call, pointerManager, extras)
+                }
                 KStateMachineCalls.Kind.TRANSITION -> {
                     val transitionName = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
                     val calleeText = call.calleeExpression?.text
@@ -100,7 +161,9 @@ class PsiElementsParser(private val output: Output) {
                     // Nested machine — render it as a substate. StateMachine
                     // extends State so it slots into the children list directly,
                     // and the diagram generator wraps it in its own named block.
-                    states += parseMachine(call, pointerManager)
+                    val extras = call.bindingNameFromAssignment()
+                        ?.let { extensionsByBinding[it] }.orEmpty()
+                    states += parseMachine(call, pointerManager, extras)
                 }
                 null -> {
                     // Listener bodies (`onEntry`, `onTransitionComplete`, etc.)
@@ -109,18 +172,15 @@ class PsiElementsParser(private val output: Output) {
                     // MVI `state { copy(…) }` setter inside an `onTransitionComplete`
                     // body would match the catalog's "state" name and spawn a
                     // phantom node. Skip them.
-                    val callee = call.calleeExpression?.text
-                    if (callee != null && callee in KStateMachineCalls.LISTENER_FUNCTIONS) {
+                    val unknownCallee = call.calleeExpression?.text
+                    if (unknownCallee != null && unknownCallee in KStateMachineCalls.LISTENER_FUNCTIONS) {
                         return@forEach
                     }
-                    // Unrecognized callee with a lambda is most likely the
-                    // `state.invoke { … }` operator-call pattern that the DSL
-                    // uses to configure a state held in a variable
-                    // (e.g. `airAttacking { transition<E>(…) }`). Recurse into
-                    // its lambda and attribute any found content to the
-                    // current scope — without binding-context resolution we
-                    // can't link the variable back to its `addState(…)` node,
-                    // but at least the transitions appear somewhere visible.
+                    // Unknown callee with a lambda that we couldn't map to a
+                    // known state binding above — recurse into its lambda and
+                    // attribute any found content to the current scope. Same
+                    // fallback as before for foreign helper extensions that
+                    // happen to call DSL builders inside.
                     val (nestedStates, nestedTransitions) =
                         parseLambdaChildren(call.dslLambda(), pointerManager)
                     states += nestedStates
@@ -131,9 +191,13 @@ class PsiElementsParser(private val output: Output) {
         return states to transitions
     }
 
-    private fun parseState(call: KtCallExpression, pointerManager: SmartPointerManager): State {
+    private fun parseState(
+        call: KtCallExpression,
+        pointerManager: SmartPointerManager,
+        extensionLambdas: List<KtLambdaExpression> = emptyList(),
+    ): State {
         val name = findArgumentValueWithDefaults(call, NAME_ARGUMENT) ?: "<unnamed>"
-        val (substates, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
+        val (substates, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager, extensionLambdas)
         val baseKind = call.kindFromCallee()
         // historyState defaults to SHALLOW; promote to HISTORY_DEEP when the
         // call explicitly passes `historyType = HistoryType.DEEP` (named or
@@ -166,9 +230,13 @@ class PsiElementsParser(private val output: Output) {
     // nested transitions and substates. We must recurse into the lambda — the
     // previous implementation skipped it and silently dropped every transition
     // declared this way.
-    private fun parseAddState(call: KtCallExpression, pointerManager: SmartPointerManager): State {
+    private fun parseAddState(
+        call: KtCallExpression,
+        pointerManager: SmartPointerManager,
+        extensionLambdas: List<KtLambdaExpression> = emptyList(),
+    ): State {
         val name = findArgumentValueWithDefaults(call, STATE_ARGUMENT) ?: "<unknown>"
-        val (substates, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
+        val (substates, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager, extensionLambdas)
         return State(
             name = name,
             states = substates,
@@ -183,7 +251,11 @@ class PsiElementsParser(private val output: Output) {
     // createStateMachine / createStateMachineBlocking / createStdLibStateMachine —
     // builds a StateMachine (a State subclass) from the call's lambda. Used for
     // top-level machines AND nested machines (substates of another machine).
-    private fun parseMachine(call: KtCallExpression, pointerManager: SmartPointerManager): StateMachine {
+    private fun parseMachine(
+        call: KtCallExpression,
+        pointerManager: SmartPointerManager,
+        extensionLambdas: List<KtLambdaExpression> = emptyList(),
+    ): StateMachine {
         // Machine factories — createStateMachine, createStateMachineBlocking,
         // createStdLibStateMachine, createTestStateMachine — all take the
         // CoroutineScope (or equivalent receiver/argument) as the FIRST
@@ -194,7 +266,7 @@ class PsiElementsParser(private val output: Output) {
         // (which finds "Hero" in `createStateMachine(scope, "Hero", …)`
         // without confusing it for the scope).
         val name = findMachineName(call) ?: "<unnamed>"
-        val (states, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager)
+        val (states, transitions) = parseLambdaChildren(call.dslLambda(), pointerManager, extensionLambdas)
         return StateMachine(
             name = name,
             states = states,
@@ -462,6 +534,10 @@ private fun resolveStateNameFromExpr(expr: KtExpression?, depth: Int = 0): Strin
         // — pull the name from the super-type constructor's string argument so
         // the resolver doesn't fall back to the raw object-literal source.
         is KtObjectLiteralExpression -> expr.extractObjectLiteralName()
+        // `this@stateLabel` inside an extension lambda (`state1 { … this@state1 … }`)
+        // refers to the state held in the labelled variable. Return the label
+        // so the downstream resolver matches it against the state's bindingName.
+        is KtThisExpression -> expr.getLabelName()
         else -> null
     }
 }

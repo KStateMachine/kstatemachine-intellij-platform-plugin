@@ -272,21 +272,40 @@ class StateMachineTreePanel(private val project: Project) {
         OpenFileDescriptor(project, vf, element.textRange.startOffset).navigate(false)
     }
 
+    /**
+     * Walk the entire tree and return the node whose pointer has the smallest
+     * source range that still contains [offset]. We deliberately don't prune
+     * subtrees by parent containment: when a state is declared in one place
+     * (`val s = initialState("S")`) but configured elsewhere via the
+     * `s { … }` operator-invoke extension pattern, the configured-in transitions
+     * are model children of `s` but their source ranges live OUTSIDE `s`'s own
+     * pointer range. Pruning would never reach them and the caret would land on
+     * the surrounding machine instead.
+     */
     private fun findSmallestContaining(
         node: DefaultMutableTreeNode,
         offset: Int,
     ): DefaultMutableTreeNode? {
-        val pointer = node.pointer()
-        if (pointer != null) {
-            val range = pointer.element?.textRange ?: return null
-            if (offset !in range.startOffset..range.endOffset) return null
+        var best: DefaultMutableTreeNode? = null
+        var bestSize = Int.MAX_VALUE
+        fun visit(n: DefaultMutableTreeNode) {
+            val pointer = n.pointer()
+            if (pointer != null) {
+                val range = pointer.element?.textRange
+                if (range != null && offset in range.startOffset..range.endOffset) {
+                    val size = range.endOffset - range.startOffset
+                    if (size < bestSize) {
+                        best = n
+                        bestSize = size
+                    }
+                }
+            }
+            for (i in 0 until n.childCount) {
+                visit(n.getChildAt(i) as DefaultMutableTreeNode)
+            }
         }
-        for (i in 0 until node.childCount) {
-            val child = node.getChildAt(i) as DefaultMutableTreeNode
-            val match = findSmallestContaining(child, offset)
-            if (match != null) return match
-        }
-        return if (pointer != null) node else null
+        visit(node)
+        return best
     }
 }
 
