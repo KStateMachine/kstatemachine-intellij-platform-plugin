@@ -157,6 +157,7 @@ class PsiElementsParser(private val output: Output) {
             // position (if/when branches included), so a `choiceState { if (c) A else B }`
             // surfaces both A and B.
             redirectTargets = if (kind.isChoice()) call.findChoiceRedirectTargets() else emptyList(),
+            bindingName = call.bindingNameFromAssignment(),
         )
     }
 
@@ -175,6 +176,7 @@ class PsiElementsParser(private val output: Output) {
             pointer = pointerManager.createSmartPsiElementPointer(call),
             kind = call.addStateKindFromCallee(),
             isParallel = call.isParallelChildMode(),
+            bindingName = call.bindingNameFromAssignment(),
         )
     }
 
@@ -199,6 +201,7 @@ class PsiElementsParser(private val output: Output) {
             transitions = transitions,
             pointer = pointerManager.createSmartPsiElementPointer(call),
             isParallel = call.isParallelChildMode(),
+            bindingName = call.bindingNameFromAssignment(),
         )
     }
 }
@@ -591,6 +594,24 @@ private fun KtCallExpression.isParallelChildMode(): Boolean {
 
 internal fun KtCallExpression.dslLambda(): KtLambdaExpression? =
     lambdaArguments.firstOrNull()?.getLambdaExpression()
+
+/**
+ * If this call sits as the right-hand side of `val x = factory(…)` or
+ * `x = factory(…)`, returns the bound variable name (`"x"`). Used so a
+ * transition target like `targetParallelStates(choiceState)` can be matched
+ * back to the state object held in the `choiceState` variable, even when the
+ * state was constructed without a `name = …` argument and its own [State.name]
+ * is therefore unnamed.
+ */
+private fun KtCallExpression.bindingNameFromAssignment(): String? {
+    val p = parent
+    return when {
+        p is KtBinaryExpression && p.operationToken == KtTokens.EQ && p.right === this ->
+            (p.left as? KtNameReferenceExpression)?.text
+        p is KtProperty && p.initializer === this -> p.name
+        else -> null
+    }
+}
 
 // Returns every KtCallExpression reachable inside this lambda's body without
 // descending into deeper lambdas — so each state's lambda forms its own scope.

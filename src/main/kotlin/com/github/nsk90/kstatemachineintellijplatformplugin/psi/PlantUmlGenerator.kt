@@ -362,13 +362,33 @@ object PlantUmlGenerator {
             .removePrefix("{").removeSuffix("}").trim()
             .trim('"')
             .lowercase()
-        val scopes: List<List<State>> = listOf(source.states) +
-            (listOf(source) + ancestors).map { it.states }
-        for (scope in scopes) {
-            scope.firstOrNull { it.name.trim('"').lowercase() == cleaned }?.let { return it }
+        // Walk the entire machine subtree rooted at the outermost ancestor.
+        // KStateMachine permits `targetParallelStates(deepStateInOtherRegion)`
+        // — restricting to the source's immediate scope (the old behaviour)
+        // misses those cross-region references and the diagram then invents
+        // a phantom state with the raw target text as its id.
+        val root = ancestors.lastOrNull() ?: source
+        return findStateInSubtree(root, cleaned)
+    }
+
+    private fun findStateInSubtree(state: State, cleanedName: String): State? {
+        if (state.matchesTargetName(cleanedName)) return state
+        for (child in state.states) {
+            findStateInSubtree(child, cleanedName)?.let { return it }
         }
         return null
     }
+
+    /**
+     * Matches by the state's logical [State.name] OR its [State.bindingName]
+     * (the Kotlin variable the state was assigned to). The binding-name path
+     * catches anonymous states — typically `choiceState { … }` calls held in
+     * a `val foo = …` / `foo = …` — that have no [State.name] of their own
+     * but are referenced by their variable name in transition targets.
+     */
+    private fun State.matchesTargetName(cleanedName: String): Boolean =
+        name.trim('"').lowercase() == cleanedName ||
+            bindingName?.lowercase() == cleanedName
 
     private fun assignIds(state: State, out: MutableMap<State, String>, taken: MutableSet<String>) {
         val base = sanitizeId(state.name)

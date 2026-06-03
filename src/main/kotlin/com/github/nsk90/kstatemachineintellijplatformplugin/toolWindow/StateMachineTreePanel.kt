@@ -151,7 +151,10 @@ class StateMachineTreePanel(private val project: Project) {
 
     private fun findStateNodeByName(node: DefaultMutableTreeNode, name: String): DefaultMutableTreeNode? {
         val state = node.userObject as? State
-        if (state != null && state.name.unquote().equals(name, ignoreCase = true)) {
+        if (state != null
+            && (state.name.unquote().equals(name, ignoreCase = true)
+                || state.bindingName?.equals(name, ignoreCase = true) == true)
+        ) {
             return node
         }
         for (i in 0 until node.childCount) {

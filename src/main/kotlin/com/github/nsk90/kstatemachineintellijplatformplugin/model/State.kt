@@ -44,6 +44,13 @@ open class State(
      * alternative outcome.
      */
     val redirectTargets: List<String> = emptyList(),
+    /**
+     * Name of the Kotlin variable this state was assigned to, when the state
+     * factory call is the RHS of `val x = state(…)` / `x = state(…)`. Lets
+     * transition targets that reference the variable (`targetParallelStates(x)`)
+     * resolve to this state even when the state's own [name] is unnamed.
+     */
+    val bindingName: String? = null,
 ) {
     /** First redirect target — convenience for callers that only need a single value. */
     val redirectTarget: String? get() = redirectTargets.firstOrNull()
