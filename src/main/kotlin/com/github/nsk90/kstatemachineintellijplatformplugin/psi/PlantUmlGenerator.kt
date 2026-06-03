@@ -208,13 +208,8 @@ object PlantUmlGenerator {
                 }
                 // Mermaid requires an explicit `[*] --> region` arrow inside
                 // each parallel region's slot — without it the renderer fails
-                // to draw the region. PlantUML doesn't tolerate this construct
-                // at the parallel-parent scope (each region's own initial is
-                // declared inside the region's own block), so we emit only
-                // for Mermaid output.
-                if (syntax == DiagramSyntax.MERMAID) {
-                    appendLine("$pad  [*] --> ${ids.getValue(child)}")
-                }
+                // to draw the region. PlantUML doesn't require this construct.
+                appendLine("$pad  [*] --> ${ids.getValue(child)}")
             }
             appendForkDeclarations(state, ids, indent + 1)
             appendLine("$pad}")
