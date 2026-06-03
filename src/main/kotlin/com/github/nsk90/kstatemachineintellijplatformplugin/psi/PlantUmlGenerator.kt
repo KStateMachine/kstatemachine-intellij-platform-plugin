@@ -165,12 +165,20 @@ object PlantUmlGenerator {
         // `<<choice>>` stereotype is identical in PlantUML and Mermaid v2 —
         // both render the state as a conditional decision diamond.
         val stereotype = if (state.kind.isChoice()) " <<choice>>" else ""
-        // Always emit the aliased `state "name" as id` form. The shorter
-        // `state id` shorthand works in PlantUML but Mermaid stateDiagram-v2
-        // silently drops simple `state foo` declarations that have no body,
-        // leaving any arrows that reference `foo` pointing at an implicit
-        // node with no label. The aliased form renders identically in both.
-        val header = "state \"${escape(displayName)}\" as $id$stereotype"
+        // Header shape depends on whether the state carries a stereotype:
+        //   - Stereotyped (`<<choice>>`, `<<fork>>`, etc.) → bare `state id <<stereo>>`.
+        //     Mermaid stateDiagram-v2 rejects the aliased
+        //     `state "name" as id <<choice>>` form; PlantUML accepts it but
+        //     renders stereotyped nodes (diamond / fork-bar) without a label
+        //     anyway, so the display name is purely decorative.
+        //   - Plain state → aliased `state "name" as id`. The shorter
+        //     `state id` shorthand works in PlantUML but Mermaid silently
+        //     drops bodyless `state foo` declarations.
+        val header = if (stereotype.isNotEmpty()) {
+            "state $id$stereotype"
+        } else {
+            "state \"${escape(displayName)}\" as $id"
+        }
         if (state.states.isEmpty()) {
             appendLine("$pad$header")
         } else if (state.isParallel) {
