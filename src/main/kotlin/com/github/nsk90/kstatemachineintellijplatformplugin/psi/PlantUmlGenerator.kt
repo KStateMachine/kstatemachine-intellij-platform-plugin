@@ -207,6 +207,7 @@ object PlantUmlGenerator {
                     appendLine("$pad  [*] --> ${ids.getValue(child)}")
                 }
             }
+            appendForkDeclarations(state, ids, indent + 1)
             appendLine("$pad}")
         } else {
             appendLine("$pad$header {")
@@ -236,6 +237,7 @@ object PlantUmlGenerator {
             state.states.filter { it.kind.isFinal() }.forEach { finalChild ->
                 appendLine("$pad  ${ids[finalChild]} --> [*]")
             }
+            appendForkDeclarations(state, ids, indent + 1)
             appendLine("$pad}")
         }
     }
@@ -278,20 +280,18 @@ object PlantUmlGenerator {
                 }
                 group.targets.isEmpty() -> Unit // shouldn't happen — parser drops empty groups
                 group.isParallel && group.targets.size >= 2 -> {
-                    // Atomic parallel split: emit a `<<fork>>` pseudo-state plus a
-                    // labeled arrow from source to fork and unlabeled arrows from
-                    // fork to each parallel target. Standard UML state-diagram
-                    // notation; both PlantUML and Mermaid stateDiagram-v2 accept
-                    // the same `state X <<fork>>` syntax verbatim.
-                    val forkId = "fork_${sourceId}_$groupIndex"
-                    appendLine("$pad" + "state $forkId <<fork>>")
+                    // Atomic parallel split: arrows from the source to a
+                    // `<<fork>>` pseudo-state, then arrows from the fork to each
+                    // parallel target. The fork's DECLARATION is emitted
+                    // separately by `appendForkDeclarations` inside the source's
+                    // parent block — otherwise PlantUML draws it floating
+                    // outside the enclosing state, which the user reported.
+                    val forkId = forkId(sourceId, groupIndex)
                     appendLine("$pad$sourceId --> $forkId$labelSuffix")
                     group.targets.forEach { targetText ->
-                        val resolvedId = group.targets.let { _ ->
-                            val resolved = resolveTarget(targetText, source, ancestors)
-                            if (resolved != null) ids.getValue(resolved) else sanitizeId(targetText)
-                        }
-                        appendLine("$pad$forkId --> $resolvedId")
+                        val resolved = resolveTarget(targetText, source, ancestors)
+                        val targetId = if (resolved != null) ids.getValue(resolved) else sanitizeId(targetText)
+                        appendLine("$pad$forkId --> $targetId")
                     }
                 }
                 else -> {
@@ -309,6 +309,39 @@ object PlantUmlGenerator {
 
     private fun String?.supportsTargetlessSemantics(): Boolean =
         this == null || this == "transition" || this == "dataTransition"
+
+    /** Stable per-(source, group-index) fork pseudo-state identifier. */
+    private fun forkId(sourceId: String, groupIndex: Int): String = "fork_${sourceId}_$groupIndex"
+
+    /**
+     * Emit `state fork_<src>_<i> <<fork>>` declarations inside [parent]'s body
+     * for every parallel-split transition of every direct child of [parent].
+     * Keeping the declaration co-located with the source state's enclosing
+     * block makes PlantUML's parser bind the fork to that scope; if it were
+     * left at the top-level (where arrows live) PlantUML would float the fork
+     * outside its containing state.
+     *
+     * Walks only direct children — deeper descendants get their forks emitted
+     * by their own enclosing `appendStateDecl` call via the recursive nature
+     * of the rendering pass.
+     */
+    private fun StringBuilder.appendForkDeclarations(
+        parent: State,
+        ids: Map<State, String>,
+        indent: Int,
+    ) {
+        val pad = "  ".repeat(indent)
+        parent.states.forEach { child ->
+            val sourceId = ids[child] ?: return@forEach
+            child.transitions.forEach { transition ->
+                transition.targetGroups.forEachIndexed { groupIndex, group ->
+                    if (group.isParallel && group.targets.size >= 2 && !group.isSelfLoop) {
+                        appendLine("${pad}state ${forkId(sourceId, groupIndex)} <<fork>>")
+                    }
+                }
+            }
+        }
+    }
 
     private fun transitionLabel(t: Transition, index: Int?): String {
         val explicit = t.name.takeIf { it.isNotBlank() && it != "<unnamed>" && it != "null" }
