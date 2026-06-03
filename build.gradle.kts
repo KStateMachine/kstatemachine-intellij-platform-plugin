@@ -31,10 +31,25 @@ repositories {
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
 dependencies {
-    // PlantUML now ships as TeaVM-compiled JS in src/main/resources/plantuml-js/
-    // (plantuml.js + viz-global.js) and renders via JCEF — same surface as the
-    // Mermaid renderer. The old Java backend (`plantuml-mit`) was dropped because
-    // its Smetana layout engine miscomposed parallel/composite state diagrams.
+    // Kotest assertions inside otherwise-JUnit3 BasePlatformTestCase tests —
+    // gives us `actual shouldBe expected` instead of the bare `assertEquals`,
+    // with cleaner multi-line string diffs in the IDE runner.
+    //
+    // Kotest 6 transitively pulls in upstream `kotlinx-coroutines-core`, which
+    // shadows JetBrains' patched build that the platform test framework needs
+    // (`runBlockingWithParallelismCompensation` is a JB-internal extension
+    // missing from upstream — its absence surfaces as a NoSuchMethodError at
+    // test bootstrap). Excluding the transitive coroutines lets the
+    // platform-bundled JB build win the classpath race.
+    testImplementation(libs.kotest.assertions.core) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+    }
+    // BasePlatformTestCase extends junit.framework.TestCase (the JUnit3 API).
+    // The IntelliJ platform test framework ships an internal copy at runtime
+    // but doesn't expose it on the test compile classpath — we add JUnit 4
+    // which bundles the `junit.framework` compat package needed at compile.
+    testImplementation(libs.junit)
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {

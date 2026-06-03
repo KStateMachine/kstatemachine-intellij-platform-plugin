@@ -5,8 +5,13 @@ intelliJPlatform = "2.16.0"
 kotlin = "2.4.0"
 kover = "0.9.8"
 qodana = "2026.1.0"
+# test deps
+kotest = "6.1.11"
+junit = "4.13.2"
 
 [libraries]
+kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]
 changelog = { id = "org.jetbrains.changelog", version.ref = "changelog" }
