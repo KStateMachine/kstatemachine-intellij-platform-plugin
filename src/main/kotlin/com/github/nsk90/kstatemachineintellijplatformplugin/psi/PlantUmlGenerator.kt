@@ -349,9 +349,18 @@ object PlantUmlGenerator {
 
     private fun transitionLabel(t: Transition, index: Int?): String {
         val explicit = t.name.takeIf { it.isNotBlank() && it != "<unnamed>" && it != "null" }
+        val event = t.eventType
         return when {
+            // When a named transition also has an event type, append the event
+            // type in angle brackets — the user wants the trigger visible on
+            // the diagram even when a name is present. Mirrors the tree's
+            // `name  <EventType>` format. Skip the append when the name
+            // already contains the event type verbatim, to avoid duplication
+            // like `SwitchEvent <SwitchEvent>`.
+            explicit != null && event != null && !explicit.contains(event) ->
+                "${escape(explicit)} <${escape(event)}>"
             explicit != null -> escape(explicit)
-            t.eventType != null -> escape(t.eventType)
+            event != null -> escape(event)
             else -> if (index != null) "Transition $index" else "Transition"
         }
     }
