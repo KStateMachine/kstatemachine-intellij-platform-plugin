@@ -532,6 +532,11 @@ private fun Transition.transitionTags(): List<String> = buildList {
             add("data")
             add("dynamic")
         }
+        "joinTransition" -> add("join")
+        "joinDataTransition" -> {
+            add("join")
+            add("data")
+        }
     }
     if (isGuarded) add("guarded")
     // `targetless` only applies to the forms that take an explicit `targetState`

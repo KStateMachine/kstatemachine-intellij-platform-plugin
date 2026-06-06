@@ -189,8 +189,12 @@ class PsiElementsParser(private val output: Output) {
                             )
                         } else null,
                         // dataTransition<E, D> / dataTransitionOn<E, D> — D is the 2nd type arg.
-                        dataType = if (calleeText in DATA_TRANSITION_CALLEES)
-                            call.typeArguments.getOrNull(1)?.text else null,
+                        // joinDataTransition<D> — D is the 1st (no event type arg).
+                        dataType = when {
+                            calleeText in DATA_TRANSITION_CALLEES -> call.typeArguments.getOrNull(1)?.text
+                            calleeText == "joinDataTransition" -> call.typeArguments.firstOrNull()?.text
+                            else -> null
+                        },
                         joinSources = if (calleeText in JOIN_TRANSITION_CALLEES)
                             call.findJoinSources() else emptyList(),
                     )
