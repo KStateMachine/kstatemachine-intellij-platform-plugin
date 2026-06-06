@@ -77,6 +77,60 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
         )
     }
 
+    fun testJoinTransitionRendersJoinPseudoState() {
+        assertPlantUml(
+            source = """
+                val machine = createStateMachine {
+                    val processing = state("processing")
+                    initialState("parallelWork", childMode = ChildMode.PARALLEL) {
+                        state("download") {
+                            val downloadJoin = state("downloadJoin")
+                            initialState("downloading") {
+                                transition<DownloadCompleteEvent> { targetState = downloadJoin }
+                            }
+                        }
+                        state("validate") {
+                            val validationJoin = state("validationJoin")
+                            initialState("validating") {
+                                transition<ValidationCompleteEvent> { targetState = validationJoin }
+                            }
+                        }
+                        joinTransition(downloadJoin, validationJoin, targetState = processing)
+                    }
+                }
+            """,
+            expected = bodyTags(
+                """
+                state "machine" as machine {
+                  state "processing" as processing
+                  state "parallelWork" as parallelWork {
+                    state "download" as download {
+                      state "downloadJoin" as downloadJoin
+                      state "downloading" as downloading
+                      downloading --> downloadJoin : DownloadCompleteEvent
+                      [*] --> downloading
+                    }
+                    [*] --> download
+                    --
+                    state "validate" as validate {
+                      state "validationJoin" as validationJoin
+                      state "validating" as validating
+                      validating --> validationJoin : ValidationCompleteEvent
+                      [*] --> validating
+                    }
+                    [*] --> validate
+                    state join_parallelWork_0 <<join>>
+                  }
+                  [*] --> parallelWork
+                }
+                downloadJoin --> join_parallelWork_0
+                validationJoin --> join_parallelWork_0
+                join_parallelWork_0 --> processing
+                """
+            ),
+        )
+    }
+
     /**
      * Pipeline harness: load [source] as a Kotlin file via the light fixture,
      * run the parser, render the (single expected) machine via the generator,

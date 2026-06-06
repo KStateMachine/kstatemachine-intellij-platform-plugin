@@ -21,6 +21,8 @@ class Transition(
     val guard: Guard? = null,
     /** For `dataTransition<E, D>` / `dataTransitionOn<E, D>` — the `D` type-arg text. */
     val dataType: String? = null,
+    /** For `joinTransition(s1, s2, …)` — the join-point state names from the vararg positions. */
+    val joinSources: List<String> = emptyList(),
 ) {
     /** First target across all groups — convenience for callers that only need a single target. */
     val targetStateName: String? get() = targetGroups.firstOrNull()?.targets?.firstOrNull()

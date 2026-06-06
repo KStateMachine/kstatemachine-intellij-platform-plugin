@@ -23,6 +23,8 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
  */
 object PlantUmlGenerator {
 
+    private const val JOIN_TRANSITION_CALLEE = "joinTransition"
+
     fun render(
         machine: StateMachine,
         darkTheme: Boolean = false,
@@ -212,6 +214,7 @@ object PlantUmlGenerator {
                 appendLine("$pad  [*] --> ${ids.getValue(child)}")
             }
             appendForkDeclarations(state, ids, indent + 1)
+            appendJoinDeclarations(state, ids, indent + 1)
             appendLine("$pad}")
         } else {
             appendLine("$pad$header {")
@@ -242,6 +245,7 @@ object PlantUmlGenerator {
                 appendLine("$pad  ${ids[finalChild]} --> [*]")
             }
             appendForkDeclarations(state, ids, indent + 1)
+            appendJoinDeclarations(state, ids, indent + 1)
             appendLine("$pad}")
         }
     }
@@ -256,6 +260,25 @@ object PlantUmlGenerator {
     ) {
         val pad = "  ".repeat(indent)
         val sourceId = ids[source] ?: return
+
+        // Join pseudo-state: each join-source fires an arrow into the <<join>>,
+        // which then fires one arrow to the target. The <<join>> declaration is
+        // placed inside the enclosing parallel block by appendJoinDeclarations.
+        if (transition.callee == JOIN_TRANSITION_CALLEE) {
+            val joinPseudoId = joinId(sourceId, source.transitions.indexOf(transition))
+            transition.joinSources.forEach { sourceName ->
+                val resolved = resolveTarget(sourceName, source, ancestors)
+                val srcId = if (resolved != null) ids.getValue(resolved) else sanitizeId(sourceName)
+                appendLine("$pad$srcId --> $joinPseudoId")
+            }
+            transition.targetGroups.firstOrNull()?.targets?.firstOrNull()?.let { targetText ->
+                val resolved = resolveTarget(targetText, source, ancestors)
+                val targetId = if (resolved != null) ids.getValue(resolved) else sanitizeId(targetText)
+                appendLine("$pad$joinPseudoId --> $targetId")
+            }
+            return
+        }
+
         val label = transitionLabel(transition, unnamedIdx[transition])
         val labelSuffix = if (label.isEmpty()) "" else " : $label"
 
@@ -316,6 +339,31 @@ object PlantUmlGenerator {
 
     /** Stable per-(source, group-index) fork pseudo-state identifier. */
     private fun forkId(sourceId: String, groupIndex: Int): String = "fork_${sourceId}_$groupIndex"
+
+    /** Stable per-(parent, transition-index) join pseudo-state identifier. */
+    private fun joinId(parentId: String, transitionIndex: Int): String = "join_${parentId}_$transitionIndex"
+
+    /**
+     * Emit `state join_<parent>_<i> <<join>>` inside [parent]'s body for every
+     * `joinTransition` in [parent]'s own transition list.
+     *
+     * The declaration is co-located with the enclosing parallel state (same
+     * scope as the `joinTransition` DSL call) so PlantUML binds the pseudo-state
+     * to that region rather than floating it at the top level.
+     */
+    private fun StringBuilder.appendJoinDeclarations(
+        parent: State,
+        ids: Map<State, String>,
+        indent: Int,
+    ) {
+        val pad = "  ".repeat(indent)
+        val parentId = ids[parent] ?: return
+        parent.transitions.forEachIndexed { index, t ->
+            if (t.callee == JOIN_TRANSITION_CALLEE && t.joinSources.isNotEmpty()) {
+                appendLine("${pad}state ${joinId(parentId, index)} <<join>>")
+            }
+        }
+    }
 
     /**
      * Emit `state fork_<src>_<i> <<fork>>` declarations inside [parent]'s body

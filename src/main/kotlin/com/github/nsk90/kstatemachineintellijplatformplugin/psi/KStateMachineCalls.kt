@@ -55,6 +55,7 @@ internal object KStateMachineCalls {
         listOf(
             "transition", "transitionOn", "transitionConditionally",
             "dataTransition", "dataTransitionOn",
+            "joinTransition",
         ).forEach { add(Declaration(it, "ru.nsk.kstatemachine.state", Kind.TRANSITION)) }
     }
 

@@ -38,6 +38,7 @@ private const val TARGET_STATE_PROPERTY = "targetState"
 private const val GUARD_PROPERTY = "guard"
 private const val DIRECTION_PROPERTY = "direction"
 private const val TRANSITION_CONDITIONALLY_CALLEE = "transitionConditionally"
+private const val JOIN_TRANSITION_CALLEE = "joinTransition"
 private const val TARGET_STATE_CALL = "targetState"
 private const val TARGET_PARALLEL_STATES_CALL = "targetParallelStates"
 private const val STAY_CALL = "stay"
@@ -190,6 +191,8 @@ class PsiElementsParser(private val output: Output) {
                         // dataTransition<E, D> / dataTransitionOn<E, D> — D is the 2nd type arg.
                         dataType = if (calleeText in DATA_TRANSITION_CALLEES)
                             call.typeArguments.getOrNull(1)?.text else null,
+                        joinSources = if (calleeText == JOIN_TRANSITION_CALLEE)
+                            call.findJoinSources() else emptyList(),
                     )
                 }
                 KStateMachineCalls.Kind.MACHINE -> {
@@ -353,6 +356,19 @@ private fun KtCallExpression.isNestedInsideMachineCall(): Boolean {
 }
 
 private val DATA_TRANSITION_CALLEES = setOf("dataTransition", "dataTransitionOn")
+
+/**
+ * For `joinTransition(s1, s2, …, name = …, targetState = …)`, collect the
+ * positional (unnamed) arguments — those are the vararg join-point state
+ * references. Named args (`name`, `targetState`) are excluded.
+ */
+private fun KtCallExpression.findJoinSources(): List<String> =
+    valueArgumentList?.arguments.orEmpty()
+        .filter { it.getArgumentName() == null }
+        .mapNotNull { arg ->
+            val expr = arg.getArgumentExpression() ?: return@mapNotNull null
+            resolveStateNameFromExpr(expr) ?: expr.targetFallbackText() ?: expr.text
+        }
 
 private fun StateKind.isData(): Boolean = when (this) {
     StateKind.DATA,
