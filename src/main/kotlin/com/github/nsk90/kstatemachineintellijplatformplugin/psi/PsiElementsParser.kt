@@ -38,7 +38,7 @@ private const val TARGET_STATE_PROPERTY = "targetState"
 private const val GUARD_PROPERTY = "guard"
 private const val DIRECTION_PROPERTY = "direction"
 private const val TRANSITION_CONDITIONALLY_CALLEE = "transitionConditionally"
-private const val JOIN_TRANSITION_CALLEE = "joinTransition"
+private val JOIN_TRANSITION_CALLEES = setOf("joinTransition", "joinDataTransition")
 private const val TARGET_STATE_CALL = "targetState"
 private const val TARGET_PARALLEL_STATES_CALL = "targetParallelStates"
 private const val STAY_CALL = "stay"
@@ -191,7 +191,7 @@ class PsiElementsParser(private val output: Output) {
                         // dataTransition<E, D> / dataTransitionOn<E, D> — D is the 2nd type arg.
                         dataType = if (calleeText in DATA_TRANSITION_CALLEES)
                             call.typeArguments.getOrNull(1)?.text else null,
-                        joinSources = if (calleeText == JOIN_TRANSITION_CALLEE)
+                        joinSources = if (calleeText in JOIN_TRANSITION_CALLEES)
                             call.findJoinSources() else emptyList(),
                     )
                 }

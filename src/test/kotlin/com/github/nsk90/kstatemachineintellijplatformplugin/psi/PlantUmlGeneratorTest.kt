@@ -77,6 +77,60 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
         )
     }
 
+    fun testJoinDataTransitionRendersJoinPseudoState() {
+        assertPlantUml(
+            source = """
+                val machine = createStateMachine {
+                    val afterJoin = dataState<String>("afterJoin")
+                    initialState("parallel", childMode = ChildMode.PARALLEL) {
+                        state("region1") {
+                            val jp1 = state("jp1")
+                            initialState("s1") {
+                                transition<SwitchEvent> { targetState = jp1 }
+                            }
+                        }
+                        state("region2") {
+                            val jp2 = state("jp2")
+                            initialState("s2") {
+                                transition<SwitchEventL1> { targetState = jp2 }
+                            }
+                        }
+                        joinDataTransition(jp1, jp2, targetState = afterJoin) { "joined" }
+                    }
+                }
+            """,
+            expected = bodyTags(
+                """
+                state "machine" as machine {
+                  state "afterJoin" as afterJoin
+                  state "parallel" as parallel {
+                    state "region1" as region1 {
+                      state "jp1" as jp1
+                      state "s1" as s1
+                      s1 --> jp1 : SwitchEvent
+                      [*] --> s1
+                    }
+                    [*] --> region1
+                    --
+                    state "region2" as region2 {
+                      state "jp2" as jp2
+                      state "s2" as s2
+                      s2 --> jp2 : SwitchEventL1
+                      [*] --> s2
+                    }
+                    [*] --> region2
+                    state join_parallel_0 <<join>>
+                  }
+                  [*] --> parallel
+                }
+                jp1 --> join_parallel_0
+                jp2 --> join_parallel_0
+                join_parallel_0 --> afterJoin
+                """
+            ),
+        )
+    }
+
     fun testJoinTransitionRendersJoinPseudoState() {
         assertPlantUml(
             source = """

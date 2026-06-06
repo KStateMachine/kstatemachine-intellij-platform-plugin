@@ -23,7 +23,7 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
  */
 object PlantUmlGenerator {
 
-    private const val JOIN_TRANSITION_CALLEE = "joinTransition"
+    private val JOIN_TRANSITION_CALLEES = setOf("joinTransition", "joinDataTransition")
 
     fun render(
         machine: StateMachine,
@@ -264,7 +264,7 @@ object PlantUmlGenerator {
         // Join pseudo-state: each join-source fires an arrow into the <<join>>,
         // which then fires one arrow to the target. The <<join>> declaration is
         // placed inside the enclosing parallel block by appendJoinDeclarations.
-        if (transition.callee == JOIN_TRANSITION_CALLEE) {
+        if (transition.callee in JOIN_TRANSITION_CALLEES) {
             val joinPseudoId = joinId(sourceId, source.transitions.indexOf(transition))
             transition.joinSources.forEach { sourceName ->
                 val resolved = resolveTarget(sourceName, source, ancestors)
@@ -359,7 +359,7 @@ object PlantUmlGenerator {
         val pad = "  ".repeat(indent)
         val parentId = ids[parent] ?: return
         parent.transitions.forEachIndexed { index, t ->
-            if (t.callee == JOIN_TRANSITION_CALLEE && t.joinSources.isNotEmpty()) {
+            if (t.callee in JOIN_TRANSITION_CALLEES && t.joinSources.isNotEmpty()) {
                 appendLine("${pad}state ${joinId(parentId, index)} <<join>>")
             }
         }
