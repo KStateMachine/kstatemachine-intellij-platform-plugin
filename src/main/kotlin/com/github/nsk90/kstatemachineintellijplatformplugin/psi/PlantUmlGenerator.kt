@@ -45,7 +45,7 @@ object PlantUmlGenerator {
         indexMachineContent(machine, unnamedIdx)
 
         val ids = mutableMapOf<State, String>()
-        assignIds(machine, ids, taken = mutableSetOf("start", "end"))
+        assignIds(machine, ids, taken = mutableSetOf("start", "end"), syntax = syntax)
 
         // The machine itself is a State — render it as a wrapping `state Name { … }`
         // block. Children are emitted recursively, including any nested machines
@@ -161,6 +161,11 @@ object PlantUmlGenerator {
         parentAncestors: List<State>,
         indent: Int,
     ) {
+        // PlantUML history pseudo-states ([H] / [H*]) are implicit — they exist
+        // as part of their parent and are only referenced in transition arrows.
+        // Emitting a `state "..." as ...` declaration would produce invalid syntax.
+        if (syntax == DiagramSyntax.PLANTUML && state.kind.isHistory()) return
+
         val pad = "  ".repeat(indent)
         val id = ids.getValue(state)
         val displayName = state.displayName(unnamedIdx[state])
@@ -451,7 +456,21 @@ object PlantUmlGenerator {
         name.trim('"').lowercase() == cleanedName ||
             bindingName?.lowercase() == cleanedName
 
-    private fun assignIds(state: State, out: MutableMap<State, String>, taken: MutableSet<String>) {
+    private fun assignIds(
+        state: State,
+        out: MutableMap<State, String>,
+        taken: MutableSet<String>,
+        parentId: String? = null,
+        syntax: DiagramSyntax = DiagramSyntax.PLANTUML,
+    ) {
+        // PlantUML represents history as a pseudo-state built into the parent:
+        // `[H]` (shallow) or `[H*]` (deep), prefixed with the parent id when
+        // referenced outside the parent's block. No explicit declaration needed.
+        if (syntax == DiagramSyntax.PLANTUML && state.kind.isHistory()) {
+            val suffix = if (state.kind == StateKind.HISTORY_DEEP) "[H*]" else "[H]"
+            out[state] = if (parentId != null) "$parentId$suffix" else suffix
+            return
+        }
         // Prefer the binding variable name as the id base when the state has
         // no explicit DSL name. This keeps the diagram source readable and
         // close to what the user wrote (`val choiceState = …` → id
@@ -466,7 +485,7 @@ object PlantUmlGenerator {
         }
         taken += id
         out[state] = id
-        state.states.forEach { assignIds(it, out, taken) }
+        state.states.forEach { assignIds(it, out, taken, id, syntax) }
     }
 
     private fun sanitizeId(name: String): String {
@@ -511,6 +530,9 @@ object PlantUmlGenerator {
         val newAncestors = listOf(state) + ancestors
         state.states.forEach { forEachStateWithAncestors(it, newAncestors, action) }
     }
+
+    private fun StateKind.isHistory(): Boolean =
+        this == StateKind.HISTORY || this == StateKind.HISTORY_DEEP
 
     private fun StateKind.isChoice(): Boolean = when (this) {
         StateKind.CHOICE,

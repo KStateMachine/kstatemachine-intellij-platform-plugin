@@ -77,6 +77,64 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
         )
     }
 
+    fun testShallowHistoryStateUsesPlantUmlPseudoStateNotation() {
+        // history states must NOT appear as state declarations; transitions to
+        // them use `parentId[H]` (shallow) or `parentId[H*]` (deep) notation.
+        assertPlantUml(
+            source = """
+                val machine = createStateMachine {
+                    initialState("State2")
+                    state("State3") {
+                        val h = historyState("H")
+                        initialState("s31")
+                        transition<PauseEvent> { targetState = h }
+                    }
+                }
+            """,
+            expected = bodyTags(
+                """
+                state "machine" as machine {
+                  state "State2" as State2
+                  state "State3" as State3 {
+                    state "s31" as s31
+                    [*] --> s31
+                  }
+                  [*] --> State2
+                }
+                State3 --> State3[H] : PauseEvent
+                """
+            ),
+        )
+    }
+
+    fun testDeepHistoryStateUsesPlantUmlPseudoStateNotation() {
+        assertPlantUml(
+            source = """
+                val machine = createStateMachine {
+                    initialState("State2")
+                    state("State3") {
+                        val h = historyState("HD", historyType = HistoryType.DEEP)
+                        initialState("s31")
+                        transition<PauseEvent> { targetState = h }
+                    }
+                }
+            """,
+            expected = bodyTags(
+                """
+                state "machine" as machine {
+                  state "State2" as State2
+                  state "State3" as State3 {
+                    state "s31" as s31
+                    [*] --> s31
+                  }
+                  [*] --> State2
+                }
+                State3 --> State3[H*] : PauseEvent
+                """
+            ),
+        )
+    }
+
     fun testJoinDataTransitionRendersJoinPseudoState() {
         assertPlantUml(
             source = """
