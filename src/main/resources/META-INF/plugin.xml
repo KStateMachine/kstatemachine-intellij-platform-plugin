@@ -4,6 +4,36 @@
     <name>KStateMachine Visual</name>
     <vendor>nsk90</vendor>
 
+    <description><![CDATA[
+        Visualizes KStateMachine state machines defined in Kotlin source files.
+
+        <p>The plugin statically analyzes Kotlin files in your project, extracts state machine
+        definitions written with the <a href="https://github.com/KStateMachine/kstatemachine">KStateMachine</a>
+        DSL, and renders them as diagrams in a dedicated tool window — without running the code.</p>
+
+        <b>Features</b>
+        <ul>
+            <li>Detects <code>createStateMachine</code>, <code>createStateMachineBlocking</code>,
+                and <code>createStdLibStateMachine</code> calls automatically as you switch editor tabs.</li>
+            <li>Renders hierarchical (nested) states, parallel regions, history states,
+                choice pseudo-states, and fork/join patterns.</li>
+            <li>Supports <code>dataState</code>, <code>choiceState</code>, and all other
+                KStateMachine state-factory variants.</li>
+            <li>Shows guarded and conditional transitions
+                (<code>transitionConditionally</code>, <code>transitionOn</code>)
+                with all statically resolvable target branches.</li>
+            <li>Displays diagrams in PlantUML and Mermaid formats; lets you copy or export the
+                diagram source.</li>
+        </ul>
+
+        <b>Links</b>
+        <ul>
+            <li><a href="https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin">Source code and documentation</a></li>
+            <li><a href="https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/issues">Issue tracker</a></li>
+            <li><a href="https://github.com/KStateMachine/kstatemachine">KStateMachine library</a></li>
+        </ul>
+    ]]></description>
+
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
     <depends>org.jetbrains.kotlin</depends>
