@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Initial pseudo-state: small solid circle -->
+  <circle cx="2.75" cy="8" r="1.75" fill="#3574F0"/>
+  <!-- Transition arrow -->
+  <line x1="4.5" y1="8" x2="5.5" y2="8" stroke="#3574F0" stroke-width="1.2" stroke-linecap="round"/>
+  <polygon points="5.5,6.25 8,8 5.5,9.75" fill="#3574F0"/>
+  <!-- Main state: hollow circle -->
+  <circle cx="12" cy="8" r="4" fill="none" stroke="#3574F0" stroke-width="1.5"/>
+</svg>

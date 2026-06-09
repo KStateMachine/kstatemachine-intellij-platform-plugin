@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <!-- Initial pseudo-state: small solid circle -->
+  <circle cx="20" cy="4" r="2.5" fill="#3574F0"/>
+  <!-- Transition: initial → main state -->
+  <line x1="20" y1="6.5" x2="20" y2="10.5" stroke="#3574F0" stroke-width="1.5" stroke-linecap="round"/>
+  <polygon points="17,10.5 20,13.5 23,10.5" fill="#3574F0"/>
+  <!-- Main state: hollow circle -->
+  <circle cx="20" cy="21" r="7.5" fill="none" stroke="#3574F0" stroke-width="2"/>
+  <!-- Transition: main state → final -->
+  <line x1="20" y1="28.5" x2="20" y2="31.5" stroke="#3574F0" stroke-width="1.5" stroke-linecap="round"/>
+  <polygon points="17,31.5 20,34.5 23,31.5" fill="#3574F0"/>
+  <!-- Final state: outer ring + inner dot -->
+  <circle cx="20" cy="37" r="3" fill="none" stroke="#3574F0" stroke-width="1.5"/>
+  <circle cx="20" cy="37" r="1.2" fill="#3574F0"/>
+</svg>
