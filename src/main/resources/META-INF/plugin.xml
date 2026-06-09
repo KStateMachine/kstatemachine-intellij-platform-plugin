@@ -1,8 +1,8 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
-<idea-plugin>
+<idea-plugin url="https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin">
     <id>com.github.nsk90.kstatemachineintellijplatformplugin</id>
     <name>KStateMachine Visual</name>
-    <vendor>nsk90</vendor>
+    <vendor url="https://github.com/nsk90" email="job.fedotov.nsk@gmail.com">nsk90</vendor>
 
     <description><![CDATA[
         Visualizes KStateMachine state machines defined in Kotlin source files.
@@ -33,6 +33,24 @@
             <li><a href="https://github.com/KStateMachine/kstatemachine">KStateMachine library</a></li>
         </ul>
     ]]></description>
+
+    <change-notes><![CDATA[
+        <b>0.1.0</b>
+        <ul>
+            <li>Initial release.</li>
+            <li>Static analysis of Kotlin source files to detect KStateMachine DSL calls
+                (<code>createStateMachine</code>, <code>createStateMachineBlocking</code>,
+                <code>createStdLibStateMachine</code>) without running the code.</li>
+            <li>Diagram rendering in PlantUML and Mermaid formats with copy and export actions.</li>
+            <li>Support for hierarchical states, parallel regions, history states,
+                choice pseudo-states, and fork/join patterns.</li>
+            <li>Guarded and conditional transitions with statically resolved branch targets.</li>
+            <li>UML meta-info annotations (<code>buildUmlMetaInfo</code>,
+                <code>buildCompositeMetaInfo</code>) for labels, descriptions, and notes.</li>
+            <li>Tree view with text search and expand/collapse controls.</li>
+            <li>Compatible with both K1 and K2 Kotlin plugin modes.</li>
+        </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
