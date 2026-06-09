@@ -356,13 +356,13 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
         val rendered = PlantUmlGenerator.render(machines.single()).trim()
         rendered shouldBe expected.trimIndent().trim()
     }
+
+    private fun bodyTags(expected: String) = """
+        @startuml
+        top to bottom direction
+        hide empty description
+
+${expected.trimIndent().trim().prependIndent("        ")}
+        @enduml
+    """.trimIndent()
 }
-
-fun bodyTags(expected: String) = """
-    @startuml
-    top to bottom direction
-    hide empty description
-
-${expected.trimIndent().trim().prependIndent("    ")}
-    @enduml
-""".trimIndent()
