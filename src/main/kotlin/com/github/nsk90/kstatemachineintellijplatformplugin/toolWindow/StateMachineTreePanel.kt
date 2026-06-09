@@ -8,6 +8,10 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.TargetGroup
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
 import com.github.nsk90.kstatemachineintellijplatformplugin.services.StateMachineViewService
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
@@ -17,12 +21,16 @@ import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.TreeSpeedSearch
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.speedSearch.SpeedSearchUtil
 import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.ui.tree.TreeUtil
+import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.IdentityHashMap
 import javax.swing.JComponent
 import javax.swing.JMenuItem
+import javax.swing.JPanel
 import javax.swing.JPopupMenu
 import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
@@ -46,7 +54,24 @@ class StateMachineTreePanel(private val project: Project) {
     // the selection programmatically in response to a caret move.
     private var suppressSelectionEvents = false
 
-    val component: JComponent get() = scrollPane
+    val component: JComponent = JPanel(BorderLayout()).apply {
+        add(createToolbar(), BorderLayout.NORTH)
+        add(scrollPane, BorderLayout.CENTER)
+    }
+
+    private fun createToolbar(): JComponent {
+        val group = DefaultActionGroup()
+        group.add(object : AnAction("Expand All", null, AllIcons.Actions.Expandall) {
+            override fun actionPerformed(e: AnActionEvent) = TreeUtil.expandAll(tree)
+        })
+        group.add(object : AnAction("Collapse All", null, AllIcons.Actions.Collapseall) {
+            override fun actionPerformed(e: AnActionEvent) = TreeUtil.collapseAll(tree, 0)
+        })
+        val toolbar = ActionManager.getInstance()
+            .createActionToolbar("StateMachineTreePanel", group, true)
+        toolbar.targetComponent = tree
+        return toolbar.component
+    }
 
     init {
         tree.addTreeSelectionListener {
@@ -71,12 +96,17 @@ class StateMachineTreePanel(private val project: Project) {
         })
         // Speed search: type while the tree is focused to jump to the first
         // matching node, exactly like IntelliJ's Project tree.
+        // Mirror the primary cell text so highlighting and navigation always agree.
         TreeSpeedSearch.installOn(tree, false) { path ->
             val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return@installOn null
+            val idx = cellRenderer.unnamedIndices[node.userObject]
             when (val data = node.userObject) {
-                is StateMachine -> data.preferredLabel() ?: "StateMachine"
-                is State -> data.preferredLabel() ?: "State"
-                is Transition -> data.transitionLabel(null)
+                is StateMachine -> {
+                    val label = data.preferredLabel()
+                    if (label != null) "StateMachine $label" else indexedTypeLabel("StateMachine", idx)
+                }
+                is State -> data.preferredLabel() ?: indexedTypeLabel("State", idx)
+                is Transition -> data.transitionLabel(idx)
                 is Guard -> data.text.singleLine()
                 else -> null
             }
@@ -413,6 +443,7 @@ private class StateMachineCellRenderer : ColoredTreeCellRenderer() {
             }
             else -> append(node.toString())
         }
+        SpeedSearchUtil.applySpeedSearchHighlighting(tree, this, false, selected)
     }
 }
 
