@@ -2,7 +2,7 @@
 <idea-plugin url="https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin">
     <id>com.github.nsk90.kstatemachineintellijplatformplugin</id>
     <name>KStateMachine Visual</name>
-    <vendor url="https://github.com/nsk90" email="job.fedotov.nsk@gmail.com">nsk90</vendor>
+    <vendor url="https://github.com/nsk90" email="nosik90@gmail.com">kstatemachine</vendor>
 
     <description><![CDATA[
         Visualizes KStateMachine state machines defined in Kotlin source files.

@@ -114,7 +114,7 @@ PRs and issues welcome. Reports with a minimal reproducible DSL snippet are the 
 
 <div align="center">
 
-Built on the [IntelliJ Platform Plugin Template][template].
+Licensed under the [MIT License](./LICENSE)
 
 </div>
 
