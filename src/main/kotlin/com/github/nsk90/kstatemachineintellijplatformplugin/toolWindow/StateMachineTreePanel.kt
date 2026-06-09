@@ -15,6 +15,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.TreeSpeedSearch
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
 import java.awt.event.MouseAdapter
@@ -68,6 +69,18 @@ class StateMachineTreePanel(private val project: Project) {
                 if (e.isPopupTrigger) maybeShowTransitionPopup(e)
             }
         })
+        // Speed search: type while the tree is focused to jump to the first
+        // matching node, exactly like IntelliJ's Project tree.
+        TreeSpeedSearch.installOn(tree, false) { path ->
+            val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return@installOn null
+            when (val data = node.userObject) {
+                is StateMachine -> data.preferredLabel() ?: "StateMachine"
+                is State -> data.preferredLabel() ?: "State"
+                is Transition -> data.transitionLabel(null)
+                is Guard -> data.text.singleLine()
+                else -> null
+            }
+        }
     }
 
     /**
