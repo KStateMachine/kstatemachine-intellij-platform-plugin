@@ -10,6 +10,7 @@ class StateMachine(
     pointer: SmartPsiElementPointer<KtCallExpression>? = null,
     isParallel: Boolean = false,
     bindingName: String? = null,
+    umlMetaInfo: UmlMetaInfo? = null,
 ) : State(
     name = name,
     states = states,
@@ -18,4 +19,5 @@ class StateMachine(
     kind = StateKind.STATE,
     isParallel = isParallel,
     bindingName = bindingName,
+    umlMetaInfo = umlMetaInfo,
 )

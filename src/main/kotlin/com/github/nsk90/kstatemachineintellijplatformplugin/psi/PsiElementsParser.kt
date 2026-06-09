@@ -6,6 +6,7 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateKind
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.TargetGroup
 import com.github.nsk90.kstatemachineintellijplatformplugin.model.Transition
+import com.github.nsk90.kstatemachineintellijplatformplugin.model.UmlMetaInfo
 import com.intellij.psi.PsiElement
 import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.util.PsiTreeUtil
@@ -39,6 +40,10 @@ private const val GUARD_PROPERTY = "guard"
 private const val DIRECTION_PROPERTY = "direction"
 private const val TRANSITION_CONDITIONALLY_CALLEE = "transitionConditionally"
 private val JOIN_TRANSITION_CALLEES = setOf("joinTransition", "joinDataTransition")
+private const val META_INFO_PROPERTY = "metaInfo"
+private const val BUILD_UML_META_INFO = "buildUmlMetaInfo"
+private const val BUILD_COMPOSITE_META_INFO = "buildCompositeMetaInfo"
+private const val LIST_OF_CALL = "listOf"
 private const val TARGET_STATE_CALL = "targetState"
 private const val TARGET_PARALLEL_STATES_CALL = "targetParallelStates"
 private const val STAY_CALL = "stay"
@@ -197,6 +202,7 @@ class PsiElementsParser(private val output: Output) {
                         },
                         joinSources = if (calleeText in JOIN_TRANSITION_CALLEES)
                             call.findJoinSources() else emptyList(),
+                        umlMetaInfo = call.extractUmlMetaInfo(),
                     )
                 }
                 KStateMachineCalls.Kind.MACHINE -> {
@@ -268,6 +274,7 @@ class PsiElementsParser(private val output: Output) {
             // surfaces both A and B.
             redirectTargets = if (kind.isChoice()) call.findChoiceRedirectTargets() else emptyList(),
             bindingName = call.bindingNameFromAssignment(),
+            umlMetaInfo = call.extractUmlMetaInfo(),
         )
     }
 
@@ -294,6 +301,7 @@ class PsiElementsParser(private val output: Output) {
             kind = call.addStateKindFromCallee(),
             isParallel = call.isParallelChildMode(),
             bindingName = call.bindingNameFromAssignment(),
+            umlMetaInfo = call.extractUmlMetaInfo(),
         )
     }
 
@@ -326,6 +334,7 @@ class PsiElementsParser(private val output: Output) {
             pointer = pointerManager.createSmartPsiElementPointer(call),
             isParallel = call.isParallelChildMode(),
             bindingName = call.bindingNameFromAssignment(),
+            umlMetaInfo = call.extractUmlMetaInfo(),
         )
     }
 }
@@ -360,6 +369,80 @@ private fun KtCallExpression.isNestedInsideMachineCall(): Boolean {
 }
 
 private val DATA_TRANSITION_CALLEES = setOf("dataTransition", "dataTransitionOn")
+
+/**
+ * Finds `metaInfo = buildUmlMetaInfo { … }` (or `buildCompositeMetaInfo`) in the call's
+ * trailing lambda and extracts the three UML annotation fields.
+ */
+private fun KtCallExpression.extractUmlMetaInfo(): UmlMetaInfo? {
+    val entry = findLambdaAssignmentEntry(META_INFO_PROPERTY) ?: return null
+    return parseUmlMetaInfoFromExpr(entry.right ?: return null)
+}
+
+/**
+ * Recursively locates `buildUmlMetaInfo { … }` inside [expr] and parses its fields.
+ * Handles:
+ *   - `buildUmlMetaInfo { … }` directly
+ *   - `buildCompositeMetaInfo(buildUmlMetaInfo { … }, …)` vararg form
+ *   - `buildCompositeMetaInfo { metaInfoSet = setOf(buildUmlMetaInfo { … }) }` builder form
+ */
+private fun parseUmlMetaInfoFromExpr(expr: KtExpression): UmlMetaInfo? {
+    if (expr !is KtCallExpression) return null
+    return when (expr.calleeExpression?.text) {
+        BUILD_UML_META_INFO -> parseUmlMetaInfoLambda(expr.dslLambda())
+        BUILD_COMPOSITE_META_INFO -> {
+            // vararg form: buildCompositeMetaInfo(buildUmlMetaInfo { … }, …)
+            expr.valueArgumentList?.arguments?.mapNotNull { arg ->
+                parseUmlMetaInfoFromExpr(arg.getArgumentExpression() ?: return@mapNotNull null)
+            }?.firstOrNull()
+            // builder form: buildCompositeMetaInfo { metaInfoSet = setOf(buildUmlMetaInfo { … }) }
+                ?: expr.dslLambda()?.bodyExpression?.statements
+                    ?.filterIsInstance<KtBinaryExpression>()
+                    ?.mapNotNull { stmt ->
+                        parseUmlMetaInfoFromExpr(stmt.right ?: return@mapNotNull null)
+                    }
+                    ?.firstOrNull()
+        }
+        // setOf(buildUmlMetaInfo { … }) — encountered when recursing into builder form
+        "setOf" -> expr.valueArgumentList?.arguments?.mapNotNull { arg ->
+            parseUmlMetaInfoFromExpr(arg.getArgumentExpression() ?: return@mapNotNull null)
+        }?.firstOrNull()
+        else -> null
+    }
+}
+
+/** Extracts [UmlMetaInfo] from the `buildUmlMetaInfo { … }` lambda body. */
+private fun parseUmlMetaInfoLambda(lambda: KtLambdaExpression?): UmlMetaInfo? {
+    val body = lambda?.bodyExpression ?: return null
+    var label: String? = null
+    var stateDescriptions: List<String> = emptyList()
+    var notes: List<String> = emptyList()
+    for (stmt in body.statements) {
+        if (stmt !is KtBinaryExpression || stmt.operationToken != KtTokens.EQ) continue
+        val prop = (stmt.left as? KtNameReferenceExpression)?.text ?: continue
+        val value = stmt.right ?: continue
+        when (prop) {
+            "umlLabel" -> label = (value as? KtStringTemplateExpression)?.umlText()
+            "umlStateDescriptions" -> stateDescriptions = value.extractStringList()
+            "umlNotes" -> notes = value.extractStringList()
+        }
+    }
+    return if (label != null || stateDescriptions.isNotEmpty() || notes.isNotEmpty())
+        UmlMetaInfo(label, stateDescriptions, notes)
+    else null
+}
+
+/** Returns the string literal content without surrounding quotes. */
+private fun KtStringTemplateExpression.umlText(): String =
+    text.let { if (it.length >= 2 && it.first() == '"' && it.last() == '"') it.substring(1, it.length - 1) else it }
+
+/** Extracts string literal values from a `listOf("a", "b", …)` call expression. */
+private fun KtExpression.extractStringList(): List<String> {
+    if (this !is KtCallExpression || calleeExpression?.text != LIST_OF_CALL) return emptyList()
+    return valueArgumentList?.arguments?.mapNotNull { arg ->
+        (arg.getArgumentExpression() as? KtStringTemplateExpression)?.umlText()
+    } ?: emptyList()
+}
 
 /**
  * For `joinTransition(s1, s2, …, name = …, targetState = …)`, collect the

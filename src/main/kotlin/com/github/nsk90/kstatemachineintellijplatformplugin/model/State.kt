@@ -51,6 +51,8 @@ open class State(
      * resolve to this state even when the state's own [name] is unnamed.
      */
     val bindingName: String? = null,
+    /** Parsed `metaInfo = buildUmlMetaInfo { … }` annotation, when present. */
+    val umlMetaInfo: UmlMetaInfo? = null,
 ) {
     /** First redirect target — convenience for callers that only need a single value. */
     val redirectTarget: String? get() = redirectTargets.firstOrNull()

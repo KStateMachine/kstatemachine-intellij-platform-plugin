@@ -59,7 +59,7 @@ object PlantUmlGenerator {
             // already inlined this state's transitions next to the region body.
             if (ancestors.any { it.isParallel }) return@forEachStateWithAncestors
             source.transitions.forEach { t ->
-                appendTransition(source, t, ancestors, ids, unnamedIdx, indent = 0)
+                appendTransition(source, t, ancestors, ids, unnamedIdx, indent = 0, syntax)
             }
             if (source.kind.isChoice() && source.redirectTargets.isNotEmpty()) {
                 appendChoiceRedirect(source, ancestors, ids, indent = 0)
@@ -168,7 +168,7 @@ object PlantUmlGenerator {
 
         val pad = "  ".repeat(indent)
         val id = ids.getValue(state)
-        val displayName = state.displayName(unnamedIdx[state])
+        val displayName = state.umlMetaInfo?.label ?: state.displayName(unnamedIdx[state])
         // `<<choice>>` stereotype is identical in PlantUML and Mermaid v2 —
         // both render the state as a conditional decision diamond.
         val stereotype = if (state.kind.isChoice()) " <<choice>>" else ""
@@ -188,6 +188,9 @@ object PlantUmlGenerator {
         }
         if (state.states.isEmpty()) {
             appendLine("$pad$header")
+            // Leaf-state annotations go at the same level as the declaration (mirroring
+            // ExportPlantUmlVisitor.visit(leaf) which emits them at the current indent).
+            appendStateMetaInfoAnnotations(state, id, pad, syntax)
         } else if (state.isParallel) {
             // Parallel/orthogonal region — each direct child is its own
             // independent region, all active simultaneously. Both PlantUML
@@ -198,6 +201,8 @@ object PlantUmlGenerator {
             // non-parallel diagrams, the parser misreads them and the second
             // region disappears.
             appendLine("$pad$header {")
+            // Annotations go inside the block before children (mirrors processStateBody).
+            appendStateMetaInfoAnnotations(state, id, "$pad  ", syntax)
             val regionAncestors = listOf(state) + parentAncestors
             state.states.forEachIndexed { idx, child ->
                 if (idx > 0) appendLine("$pad  --")
@@ -208,7 +213,7 @@ object PlantUmlGenerator {
                 // handled inside the recursive appendStateDecl call above,
                 // at the indent of their own source state's enclosing block.
                 child.transitions.forEach { t ->
-                    appendTransition(child, t, regionAncestors, ids, unnamedIdx, indent + 1)
+                    appendTransition(child, t, regionAncestors, ids, unnamedIdx, indent + 1, syntax)
                 }
                 if (child.kind.isChoice() && child.redirectTarget != null) {
                     appendChoiceRedirect(child, regionAncestors, ids, indent + 1)
@@ -223,6 +228,8 @@ object PlantUmlGenerator {
             appendLine("$pad}")
         } else {
             appendLine("$pad$header {")
+            // Annotations go inside the block before children (mirrors processStateBody).
+            appendStateMetaInfoAnnotations(state, id, "$pad  ", syntax)
             val innerAncestors = listOf(state) + parentAncestors
             // Inside a parallel ancestor scope we MUST emit each child's
             // outgoing arrows in the lexical block where the child is
@@ -234,7 +241,7 @@ object PlantUmlGenerator {
                 appendStateDecl(child, ids, unnamedIdx, syntax, innerAncestors, indent + 1)
                 if (insideParallel) {
                     child.transitions.forEach { t ->
-                        appendTransition(child, t, innerAncestors, ids, unnamedIdx, indent + 1)
+                        appendTransition(child, t, innerAncestors, ids, unnamedIdx, indent + 1, syntax)
                     }
                     if (child.kind.isChoice() && child.redirectTarget != null) {
                         appendChoiceRedirect(child, innerAncestors, ids, indent + 1)
@@ -255,6 +262,24 @@ object PlantUmlGenerator {
         }
     }
 
+    /**
+     * Emits `id : description` rows and `note right of id : …` lines for a state.
+     * Descriptions appear in both PlantUML and Mermaid; notes are PlantUML-only
+     * (mirroring [ExportPlantUmlVisitor]).
+     */
+    private fun StringBuilder.appendStateMetaInfoAnnotations(
+        state: State,
+        id: String,
+        pad: String,
+        syntax: DiagramSyntax,
+    ) {
+        val meta = state.umlMetaInfo ?: return
+        meta.stateDescriptions.forEach { appendLine("$pad$id : $it") }
+        if (syntax == DiagramSyntax.PLANTUML) {
+            meta.notes.forEach { appendLine("${pad}note right of $id : $it") }
+        }
+    }
+
     private fun StringBuilder.appendTransition(
         source: State,
         transition: Transition,
@@ -262,6 +287,7 @@ object PlantUmlGenerator {
         ids: Map<State, String>,
         unnamedIdx: java.util.IdentityHashMap<Any, Int>,
         indent: Int,
+        syntax: DiagramSyntax = DiagramSyntax.PLANTUML,
     ) {
         val pad = "  ".repeat(indent)
         val sourceId = ids[source] ?: return
@@ -337,6 +363,15 @@ object PlantUmlGenerator {
                 }
             }
         }
+        // Transition notes: `note on link / text / end note` — PlantUML only,
+        // mirroring ExportPlantUmlVisitor which skips this for Mermaid.
+        if (syntax == DiagramSyntax.PLANTUML) {
+            transition.umlMetaInfo?.notes?.forEach { note ->
+                appendLine("${pad}note on link")
+                appendLine("$pad  $note")
+                appendLine("${pad}end note")
+            }
+        }
     }
 
     private fun String?.supportsTargetlessSemantics(): Boolean =
@@ -401,7 +436,10 @@ object PlantUmlGenerator {
     }
 
     private fun transitionLabel(t: Transition, index: Int?): String {
-        val explicit = t.name.takeIf { it.isNotBlank() && it != "<unnamed>" && it != "null" }
+        // umlLabel overrides the DSL transition name, mirroring ExportPlantUmlVisitor's
+        // `transition.metaInfo?.umlLabel ?: transition.name` logic.
+        val explicit = t.umlMetaInfo?.label
+            ?: t.name.takeIf { it.isNotBlank() && it != "<unnamed>" && it != "null" }
         val event = t.eventType
         return when {
             // When a named transition also has an event type, append the event

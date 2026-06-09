@@ -77,6 +77,104 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
         )
     }
 
+    fun testUmlMetaInfoLabelDescriptionsAndNotes() {
+        // Mirrors PlantUmlExportWithUmlMetaInfoSample:
+        //   machine-level umlLabel → state "Nested states sm" as machine
+        //   state umlLabel        → state "FinalState 2 Label" as State2
+        //   umlStateDescriptions  → State2 : Description N  (inside State2's block — but State2 is a leaf here)
+        //   umlNotes on state     → note right of State2 : Note N
+        //   transition umlLabel   → used as the arrow label
+        assertPlantUml(
+            source = """
+                val machine = createStateMachine(name = "MySm") {
+                    metaInfo = buildUmlMetaInfo { umlLabel = "Nested states sm" }
+                    val state2 = finalState("State2") {
+                        metaInfo = buildUmlMetaInfo {
+                            umlLabel = "FinalState 2 Label"
+                            umlStateDescriptions = listOf("Description 1", "Description 2")
+                            umlNotes = listOf("Note 1", "Note 2")
+                        }
+                    }
+                    initialState("State1") {
+                        metaInfo = buildUmlMetaInfo { umlLabel = "State 1 Label" }
+                        transition<SwitchEvent> {
+                            metaInfo = buildUmlMetaInfo { umlLabel = "go to State 2" }
+                            targetState = state2
+                        }
+                    }
+                }
+            """,
+            expected = bodyTags(
+                """
+                state "Nested states sm" as MySm {
+                  state "FinalState 2 Label" as State2
+                  State2 : Description 1
+                  State2 : Description 2
+                  note right of State2 : Note 1
+                  note right of State2 : Note 2
+                  state "State 1 Label" as State1
+                  [*] --> State1
+                  State2 --> [*]
+                }
+                State1 --> State2 : go to State 2 <SwitchEvent>
+                """
+            ),
+        )
+    }
+
+    fun testUmlMetaInfoTransitionNote() {
+        assertPlantUml(
+            source = """
+                val machine = createStateMachine {
+                    val state2 = finalState("State2")
+                    initialState("State1") {
+                        transition<SwitchEvent> {
+                            metaInfo = buildUmlMetaInfo { umlNotes = listOf("Note 1", "Note 2") }
+                            targetState = state2
+                        }
+                    }
+                }
+            """,
+            expected = bodyTags(
+                """
+                state "machine" as machine {
+                  state "State2" as State2
+                  state "State1" as State1
+                  [*] --> State1
+                  State2 --> [*]
+                }
+                State1 --> State2 : SwitchEvent
+                note on link
+                  Note 1
+                end note
+                note on link
+                  Note 2
+                end note
+                """
+            ),
+        )
+    }
+
+    fun testUmlMetaInfoCompositeMetaInfo() {
+        // buildCompositeMetaInfo vararg form — same rendering as direct buildUmlMetaInfo
+        assertPlantUml(
+            source = """
+                val machine = createStateMachine {
+                    metaInfo = buildCompositeMetaInfo(buildUmlMetaInfo { umlLabel = "My Machine" })
+                    initialState("State1")
+                }
+            """,
+            expected = bodyTags(
+                """
+                state "My Machine" as machine {
+                  state "State1" as State1
+                  [*] --> State1
+                }
+                """
+            ),
+        )
+    }
+
     fun testShallowHistoryStateUsesPlantUmlPseudoStateNotation() {
         // history states must NOT appear as state declarations; transitions to
         // them use `parentId[H]` (shallow) or `parentId[H*]` (deep) notation.
