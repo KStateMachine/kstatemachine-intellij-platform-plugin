@@ -274,8 +274,8 @@ object PlantUmlGenerator {
         syntax: DiagramSyntax,
     ) {
         val meta = state.umlMetaInfo ?: return
-        meta.stateDescriptions.forEach { appendLine("$pad$id : $it") }
         if (syntax == DiagramSyntax.PLANTUML) {
+            meta.stateDescriptions.forEach { appendLine("$pad$id : $it") }
             meta.notes.forEach { appendLine("${pad}note right of $id : $it") }
         }
     }
