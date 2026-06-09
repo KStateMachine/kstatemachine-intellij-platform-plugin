@@ -5,3 +5,5 @@
 build
 .claude/settings.local.json
 .kotlin/
+private-kstatemachine.pem
+chain.crt

@@ -109,9 +109,9 @@ intellijPlatform {
     }
 
     signing {
-        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
-        privateKey = providers.environmentVariable("PRIVATE_KEY")
         password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
+        privateKeyFile = file("./private-kstatemachine.pem")
+        certificateChainFile = file("./chain.crt")
     }
 
     publishing {
