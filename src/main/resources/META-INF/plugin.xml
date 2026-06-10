@@ -48,7 +48,6 @@
             <li>UML meta-info annotations (<code>buildUmlMetaInfo</code>,
                 <code>buildCompositeMetaInfo</code>) for labels, descriptions, and notes.</li>
             <li>Tree view with text search and expand/collapse controls.</li>
-            <li>Compatible with both K1 and K2 Kotlin plugin modes.</li>
         </ul>
     ]]></change-notes>
 
