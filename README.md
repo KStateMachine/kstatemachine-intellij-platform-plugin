@@ -2,7 +2,8 @@
 
 # KStateMachine Visual
 
-**IntelliJ plugin for [KStateMachine](https://github.com/KStateMachine/kstatemachine) — visualize and navigate state machines straight from your source.**
+**IntelliJ plugin for [KStateMachine](https://github.com/KStateMachine/kstatemachine) — visualize and navigate state
+machines straight from your source.**
 
 ---
 
@@ -23,11 +24,15 @@
 ---
 
 <!-- Plugin description -->
-**KStateMachine Visual** is the IDE plugin for the [KStateMachine](https://github.com/KStateMachine/kstatemachine) Kotlin library.
+**KStateMachine Visual** is the IDE plugin for the [KStateMachine](https://github.com/KStateMachine/kstatemachine)
+Kotlin library.
 
-It statically analyzes your Kotlin source — including `if` / `when` branches that the runtime PlantUML export cannot see — and shows every state machine in the current file as both a navigable tree and a rendered UML state diagram.
+It statically analyzes your Kotlin source — including `if` / `when` branches that the runtime PlantUML export cannot
+see — and shows every state machine in the current file as both a navigable tree and a rendered UML state diagram.
 
-Click any tree node to jump to its declaration; move the editor caret and the tree selection follows. Gutter icons mark every `createStateMachine` / `state` / `transition` call. The diagram updates live as you type, and the PlantUML source can be copied or exported as SVG.
+Click any tree node to jump to its declaration; move the editor caret and the tree selection follows. Gutter icons mark
+every `createStateMachine` / `state` / `transition` call. The diagram updates live as you type, and the PlantUML source
+can be copied or exported as SVG.
 <!-- Plugin description end -->
 
 > [!NOTE]
@@ -40,19 +45,23 @@ Click any tree node to jump to its declaration; move the editor caret and the tr
 - Recursive parsing of nested DSL — any depth, including states inside `if` / `when` branches
 - Tree view with per-kind icons (initial, final, choice, history, data, mutable data, parallel, …)
 - Bidirectional editor ↔ tree navigation
-- Rendered PlantUML state diagram in-panel (Smetana layout — no Graphviz needed)
+- Rendered PlantUML & Mermaid state diagram in-panel (JS layout — no Graphviz needed)
 - Editable Playground tab for ad-hoc PlantUML (e.g. runtime exports)
 - Editor gutter icons next to every KStateMachine DSL call
 - Live, debounced refresh while typing
-- Copy PlantUML source / Export diagram as PNG or SVG
+- Copy PlantUML source / Export diagram as SVG
 
 ---
 
 ## 💾 Install
 
-**From Marketplace** — <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>Marketplace</kbd> → search **"KStateMachine Visual"**, or open the [plugin page](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual) and click **Install**.
+**From Marketplace** — <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>Marketplace</kbd> → search **"KStateMachine
+Visual"**, or open the [plugin page](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual) and click *
+*Install**.
 
-**Manual** — download the `.zip` from [Releases](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/releases/latest) and use <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> → <kbd>Install plugin from disk…</kbd>.
+**Manual** — download the `.zip`
+from [Releases](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/releases/latest) and use <kbd>
+Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> → <kbd>Install plugin from disk…</kbd>.
 
 **Compatibility:** IntelliJ Platform 2026.1+ (Community or Ultimate), bundled Kotlin + Java plugins required.
 
@@ -84,12 +93,12 @@ Click any tree node to jump to its declaration; move the editor caret and the tr
 
 PRs and issues welcome. Reports with a minimal reproducible DSL snippet are the most actionable.
 
-| Channel | Best for |
-|---|---|
-| [Slack `#kstatemachine`](https://kotlinlang.slack.com/archives/C07DVAEKLM8) | Quick questions |
-| [GitHub Issues](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/issues) | Bug reports, features |
-| [GitHub Discussions](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/discussions) | Longer-form questions |
-| [KStateMachine library](https://github.com/KStateMachine/kstatemachine) | Questions about the library |
+| Channel                                                                                         | Best for                    |
+|-------------------------------------------------------------------------------------------------|-----------------------------|
+| [Slack `#kstatemachine`](https://kotlinlang.slack.com/archives/C07DVAEKLM8)                     | Quick questions             |
+| [GitHub Issues](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/issues) | Bug reports, features       |
+| [GitHub Discussions](https://github.com/KStateMachine/kstatemachine/discussions)                | Longer-form questions       |
+| [KStateMachine library](https://github.com/KStateMachine/kstatemachine)                         | Questions about the library |
 
 ---
 
@@ -100,4 +109,5 @@ Licensed under the [MIT License](./LICENSE)
 </div>
 
 [template]: https://github.com/JetBrains/intellij-platform-plugin-template
+
 [docs:plugin-description]: https://plugins.jetbrains.com/docs/intellij/plugin-user-experience.html#plugin-description-and-presentation
