@@ -7,8 +7,8 @@
 ---
 
 [![Build](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/workflows/Build/badge.svg)](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/actions)
-[![Version](https://img.shields.io/jetbrains/plugin/v/MARKETPLACE_ID.svg)](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID)
-[![Downloads](https://img.shields.io/jetbrains/plugin/d/MARKETPLACE_ID.svg)](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID)
+[![Version](https://img.shields.io/jetbrains/plugin/v/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
+[![Downloads](https://img.shields.io/jetbrains/plugin/d/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
 [![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2026.1-blue?logo=intellijidea)](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html)
 [![Slack](https://img.shields.io/badge/slack-kstatemachine-purple?logo=slack)](https://kotlinlang.slack.com/archives/C07DVAEKLM8)
 
@@ -50,7 +50,7 @@ Click any tree node to jump to its declaration; move the editor caret and the tr
 
 ## 💾 Install
 
-**From Marketplace** _(once published)_ — <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>Marketplace</kbd> → search **"KStateMachine Visual"**.
+**From Marketplace** — <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>Marketplace</kbd> → search **"KStateMachine Visual"**, or open the [plugin page](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual) and click **Install**.
 
 **Manual** — download the `.zip` from [Releases](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/releases/latest) and use <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> → <kbd>Install plugin from disk…</kbd>.
 
@@ -64,7 +64,6 @@ Click any tree node to jump to its declaration; move the editor caret and the tr
 
 - [ ] Project-wide tab listing every machine across the project
 - [ ] Rename refactoring of state names via the tree
-- [ ] "Find Usages" for states
 - [ ] Inspection: unreachable states and missing initial states
 - [ ] Open generated PlantUML in browser (kroki.io / plantuml.com)
 - [ ] In-editor preview balloon anchored to the machine
@@ -91,24 +90,6 @@ PRs and issues welcome. Reports with a minimal reproducible DSL snippet are the 
 | [GitHub Issues](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/issues) | Bug reports, features |
 | [GitHub Discussions](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/discussions) | Longer-form questions |
 | [KStateMachine library](https://github.com/KStateMachine/kstatemachine) | Questions about the library |
-
----
-
-<details>
-<summary><b>Maintainer checklist (template setup todos)</b></summary>
-
-- [x] Create a new [IntelliJ Platform Plugin Template][template] project.
-- [x] Get familiar with the [template documentation][template].
-- [x] Adjust the [pluginGroup](./gradle.properties) and [pluginName](./gradle.properties), as well as the [id](./src/main/resources/META-INF/plugin.xml) and [sources package](./src/main/kotlin).
-- [x] Adjust the plugin description in `README` (see [Tips][docs:plugin-description])
-- [x] Review the [Legal Agreements](https://plugins.jetbrains.com/docs/marketplace/legal-agreements.html?from=IJPluginTemplate).
-- [ ] [Publish a plugin manually](https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html?from=IJPluginTemplate) for the first time.
-- [ ] Set the `MARKETPLACE_ID` in the badges above. Obtainable once the plugin is published.
-- [ ] Set the [Plugin Signing](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html?from=IJPluginTemplate) related [secrets](https://github.com/JetBrains/intellij-platform-plugin-template#environment-variables).
-- [ ] Set the [Deployment Token](https://plugins.jetbrains.com/docs/marketplace/plugin-upload.html?from=IJPluginTemplate).
-- [x] Click <kbd>Watch</kbd> on the [IntelliJ Platform Plugin Template][template] repo to get release notifications.
-
-</details>
 
 ---
 
