@@ -9,7 +9,7 @@
 [![Build](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/workflows/Build/badge.svg)](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/actions)
 [![Version](https://img.shields.io/jetbrains/plugin/v/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
 [![Downloads](https://img.shields.io/jetbrains/plugin/d/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
-[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2026.1-blue?logo=intellijidea)](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html)
+[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2026.1%20%E2%80%93%202026.1*-blue?logo=intellijidea)](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html)
 [![Slack](https://img.shields.io/badge/slack-kstatemachine-purple?logo=slack)](https://kotlinlang.slack.com/archives/C07DVAEKLM8)
 
 [💾 Install](#-install) &nbsp;·&nbsp;
@@ -27,7 +27,7 @@
 
 It statically analyzes your Kotlin source — including `if` / `when` branches that the runtime PlantUML export cannot see — and shows every state machine in the current file as both a navigable tree and a rendered UML state diagram.
 
-Click any tree node to jump to its declaration; move the editor caret and the tree selection follows. Gutter icons mark every `createStateMachine` / `state` / `transition` call. The diagram updates live as you type, and the PlantUML source can be copied or exported as PNG / SVG.
+Click any tree node to jump to its declaration; move the editor caret and the tree selection follows. Gutter icons mark every `createStateMachine` / `state` / `transition` call. The diagram updates live as you type, and the PlantUML source can be copied or exported as SVG.
 <!-- Plugin description end -->
 
 > [!NOTE]
