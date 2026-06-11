@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests covering the `historyState` / deep-history constructs in KStateMachine.
@@ -43,7 +42,7 @@ class HistoryStateTest : BasePlatformTestCase() {
         // without any transition targeting it. The history state must not appear
         // as a `state "H" as H` declaration in the diagram — it is completely
         // suppressed. The sibling states and the initial arrow are unaffected.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Parent") {
@@ -79,7 +78,7 @@ class HistoryStateTest : BasePlatformTestCase() {
         // has no name arg), so it falls back to the raw identifier text `"h"`.
         // `resolveTarget("h", …)` then matches the state via its bindingName, and
         // `ids[h]` = "Parent[H]" — the correct PlantUML pseudo-state notation.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val parent = state("Parent") {
@@ -117,7 +116,7 @@ class HistoryStateTest : BasePlatformTestCase() {
         // argument. `isDeepHistory()` accepts any argument whose text ends with
         // `.DEEP`, so `"HistoryType.DEEP"` is detected and the kind is set to
         // HISTORY_DEEP. The ID becomes `Parent[H*]` instead of `Parent[H]`.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val parent = state("Parent") {
@@ -159,7 +158,7 @@ class HistoryStateTest : BasePlatformTestCase() {
         //   history (KtNameRef) → resolveLocalInitializer → parent.historyState("H")
         //   (KtDotQualifiedExpression) → selector historyState("H") → name "H"
         //   → resolveTarget("H") finds the history State → id "Parent[H]".
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val parent = state("Parent") {
@@ -196,7 +195,7 @@ class HistoryStateTest : BasePlatformTestCase() {
         // argument provides a fallback when no history has been recorded yet.
         // The parser ignores it (no model field for it); the history state is
         // still suppressed from the diagram, and siblings render normally.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Parent") {
@@ -237,7 +236,7 @@ class HistoryStateTest : BasePlatformTestCase() {
         // would find the first one (depth-first order) for both transitions.
         // Distinct names avoid that ambiguity and isolate the ID-assignment
         // behaviour under test.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val parent1 = state("Parent1") {
@@ -275,25 +274,4 @@ class HistoryStateTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { /* discard log output */ }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

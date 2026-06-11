@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests for nested (hierarchical) states and composed (nested) state machines.
@@ -21,7 +20,7 @@ import org.jetbrains.kotlin.psi.KtFile
 class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
 
     fun testTwoLevelInlineNestedStates() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -48,7 +47,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testThreeLevelNestedStates() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     initialState("L1") {
@@ -76,7 +75,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testCrossLevelTransitionToNephewState() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     initialState("State1") {
@@ -111,7 +110,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testParentStateCarriesTransitionAndChildren() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -140,7 +139,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testAddStateObjectPatternWithNesting() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     addInitialState(StateA) {
@@ -171,7 +170,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testFinishedEventPatternWithNestedFinalState() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -204,7 +203,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testMultipleParentStatesWithMixedChildren() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     initialState("Idle")
@@ -234,7 +233,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testInlineNestedMachineAppearsAsSubstate() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("outer") {
                     initialState("OuterState1")
@@ -261,7 +260,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testOuterTransitionTargetsInnerMachineByVariable() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("outer") {
                     val inner = createStateMachine("inner", start = false) {
@@ -289,7 +288,7 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
     }
 
     fun testInlineNestedMachineWithInternalTransitions() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("outer") {
                     createStateMachine("inner", start = false) {
@@ -317,23 +316,4 @@ class NestedStatesAndComposedMachinesTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { /* discard log output */ }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

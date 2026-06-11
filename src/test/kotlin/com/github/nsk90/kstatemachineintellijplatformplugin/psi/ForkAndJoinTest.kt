@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests covering the fork/join parallel-control-flow constructs in KStateMachine:
@@ -41,7 +40,7 @@ class ForkAndJoinTest : BasePlatformTestCase() {
         // declaration is placed inside the enclosing machine block by
         // appendForkDeclarations; the arrows are emitted by the global transition
         // pass.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val stateA = state("StateA")
@@ -80,7 +79,7 @@ class ForkAndJoinTest : BasePlatformTestCase() {
         // emits fork arrows for the parallel group (group index 0) and a plain
         // arrow for the single-target group (group index 1), both labeled with
         // the transition event.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val stateA = state("StateA")
@@ -125,7 +124,7 @@ class ForkAndJoinTest : BasePlatformTestCase() {
         // cannot reach them from the joinTransition call site — the parser falls
         // back to raw identifier text ("jpA" etc.), and the renderer resolves
         // those raw names against the full machine subtree at render time.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val afterJoin = state("AfterJoin")
@@ -200,7 +199,7 @@ class ForkAndJoinTest : BasePlatformTestCase() {
         // <<join>> declaration is emitted inside the container's block regardless
         // of childMode.  The join source names are resolved via the container's
         // own lambda scope.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val joined = state("Joined")
@@ -240,7 +239,7 @@ class ForkAndJoinTest : BasePlatformTestCase() {
         // passes those strings through sanitizeId() and emits phantom source ids
         // that don't correspond to any declared state — the <<join>> declaration
         // and target arrow are still emitted correctly.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val joined = state("Joined")
@@ -288,7 +287,7 @@ class ForkAndJoinTest : BasePlatformTestCase() {
         // Traversal order in the global pass is depth-first pre-order, so
         // ParallelWork's join arrows appear before Start's fork arrows in the
         // output.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val final = state("Final")
@@ -330,25 +329,4 @@ class ForkAndJoinTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { /* discard log output */ }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

@@ -1,9 +1,8 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
-import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+
 import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
 
 /**
  * Parser edge-case and robustness tests — constructs that each have dedicated parser code paths
@@ -52,7 +51,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // createStateMachineBlocking(scope, "Name", …) — the scope object is the
         // first positional arg but is not a string literal, so findMachineName
         // advances to the second positional arg ("Hero") which is a string literal.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachineBlocking(coroutineScope, "Hero") {
                     initialState("Idle")
@@ -72,7 +71,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
     fun testCreateStateMachineBlockingExtractsNameFromNamedArg() {
         // Named `name = "Hero"` — the explicit name argument is found in priority
         // before any positional string-literal search.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachineBlocking(scope, name = "Hero") {
                     initialState("Idle")
@@ -92,7 +91,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
     fun testCreateStdLibStateMachineExtractsNameFromFirstStringLiteralArg() {
         // createStdLibStateMachine("Hero") — no CoroutineScope argument; the name
         // is the first (and only) positional string-literal argument.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStdLibStateMachine("Hero") {
                     initialState("Idle")
@@ -113,7 +112,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // findTopLevelMachineCalls() collects every top-level createStateMachine call
         // that is not nested inside another machine. Two machines in the same file
         // must produce two independent entries in the parse result.
-        val machines = parseMachines(
+        val machines = parseMachines(myFixture, 
             source = """
                 val first = createStateMachine("First") {
                     initialState("A")
@@ -135,7 +134,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // isInitial() nor isFinal() applies, so no [*] --> or --> [*] arrows are emitted.
         // addInitialState is present to give the machine a valid initial arrow so the
         // contrast between the two forms is clear.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     addState(IdleState())
@@ -160,7 +159,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // `val name = "red"` declared inside the machine lambda (a KtBlockExpression)
         // — findLocalStringConstant walks enclosing block scopes to find the binding.
         // The state's display name and id both become "red".
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val name = "red"
@@ -182,7 +181,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // Top-level `val STATE_NAME = "idle"` — findTopLevelStringConstant looks at
         // the KtFile's top-level property declarations. The reference `STATE_NAME`
         // inside the machine lambda resolves to "idle" via this path.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val STATE_NAME = "idle"
 
@@ -205,7 +204,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // `object StateNames { val IDLE = "idle" }` — findScopedStringConstant finds
         // a KtObjectDeclaration named "StateNames" in the file, then locates property
         // "IDLE" within it. The dotted expression `StateNames.IDLE` resolves to "idle".
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 object StateNames {
                     val IDLE = "idle"
@@ -231,7 +230,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // findScopedStringConstant falls through to the KtClass path and locates
         // the companion object's property "IDLE". The dotted `StateNames.IDLE`
         // expression resolves to "idle" through the same mechanism.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 class StateNames {
                     companion object {
@@ -261,7 +260,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // parser's main pass returns early on the call instead of recursing into its
         // lambda. The `state("ghost")` call inside the listener body must NOT produce
         // a phantom state node in the diagram.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("Start") {
@@ -287,7 +286,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // callee is in LISTENER_FUNCTIONS. The `transition<E>` inside its lambda body
         // is NOT parsed as a real DSL transition and must NOT produce an arrow in the
         // diagram.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val s2 = state("S2")
@@ -319,7 +318,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // findObjectDeclarationInFile() which scans the file's top-level declarations
         // and returns the object's own name "StandingState".
         // addState(StandingState) registers the same name via simplifiedStateName().
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 object StandingState
 
@@ -353,7 +352,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // is NOT in that list, so the generator silently skips this transition.
         // The state S2 still appears (it is declared in the machine), but no arrow
         // is drawn from S1 to S2.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val s2 = state("S2")
@@ -381,7 +380,7 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
         // `S1 --> S1 : E` is emitted. This is the same semantics as
         // `transition<E>()` (no lambda at all), confirming both forms are equivalent
         // from the parser/generator perspective.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -400,33 +399,4 @@ class ParserEdgeCasesTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val rendered = PlantUmlGenerator.render(parseSingleMachine(source)).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun parseSingleMachine(source: String): StateMachine {
-        val machines = parseMachines(source)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        return machines.single()
-    }
-
-    private fun parseMachines(source: String): List<StateMachine> {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        return PsiElementsParser { }.parse(file)
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests covering parallel states (orthogonal regions) in KStateMachine.
@@ -37,7 +36,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
     fun testTwoRegionParallelStateSeparatedByDoubleDash() {
         // Minimal parallel state: two leaf regions inside a machine. The generator
         // emits the `--` separator between them and a `[*] --> regionId` for each.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Work", childMode = ChildMode.PARALLEL) {
@@ -68,7 +67,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
     fun testThreeRegionParallelStateHasTwoSeparators() {
         // Three regions → two `--` separators. Verifies the forEachIndexed guard
         // (`if (idx > 0) appendLine("--")`) rather than a fixed separator count.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Work", childMode = ChildMode.PARALLEL) {
@@ -108,7 +107,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
         // Each region has its own initial/final states and an intra-region transition.
         // The global transition pass skips everything inside the top-level parallel
         // machine — all arrows are emitted inline.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m", childMode = ChildMode.PARALLEL) {
                     state("Region1") {
@@ -159,7 +158,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
         // pass skips them (ancestors.any { it.isParallel } = true). This test
         // verifies that arrows from StateA1 and StateB1 appear inside their region
         // blocks, not at the top level.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("Active", childMode = ChildMode.PARALLEL) {
@@ -210,7 +209,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
         // child states. Initial arrows and final arrows are emitted inside each
         // region block because the regions live inside a parallel parent
         // (insideParallel = true triggers inline emission for those children).
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Composite", childMode = ChildMode.PARALLEL) {
@@ -261,7 +260,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
         // of its regions). resolveLocalInitializer resolves `work` to the name "Work"
         // via the val binding. The arrow appears in the global pass (Idle's ancestors
         // contain no parallel state). The parallel state's interior is not affected.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val work = state("Work", childMode = ChildMode.PARALLEL) {
@@ -300,7 +299,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
         // the region layout inside it. Transitions of states that are children of
         // the Outer (non-parallel) state are handled by the global pass — only
         // states inside the Inner parallel block are inlined.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Outer") {
@@ -342,7 +341,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
         // the named `childMode = ChildMode.PARALLEL` form. isParallelChildMode()
         // accepts any argument whose text ends with ".PARALLEL", so both forms
         // produce an identical parallel rendering.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Work", ChildMode.PARALLEL) {
@@ -379,7 +378,7 @@ class ParallelStatesTest : BasePlatformTestCase() {
         // State1's sub-regions (State11 / State12) render as parallel blocks inside
         // State1's block. State2's transition is emitted inline because State2 lives
         // inside the top-level parallel machine.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m", childMode = ChildMode.PARALLEL) {
                     state("State1", childMode = ChildMode.PARALLEL) {
@@ -435,25 +434,4 @@ class ParallelStatesTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

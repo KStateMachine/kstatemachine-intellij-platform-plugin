@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Round-trip tests for the parser + diagram generator pipeline. Each test
@@ -31,7 +30,7 @@ import org.jetbrains.kotlin.psi.KtFile
 class PlantUmlGeneratorTest : BasePlatformTestCase() {
 
     fun testSingleInitialStateRendersBareDiagram() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     initialState("Red")
@@ -56,7 +55,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
         // transition should land on Red's scope, not on the surrounding
         // machine. Also exercises target resolution through a variable
         // initializer chain (`val green = state("Green")`).
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val red = initialState("Red")
@@ -84,7 +83,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
         //   umlStateDescriptions  → State2 : Description N  (inside State2's block — but State2 is a leaf here)
         //   umlNotes on state     → note right of State2 : Note N
         //   transition umlLabel   → used as the arrow label
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine(name = "MySm") {
                     metaInfo = buildUmlMetaInfo { umlLabel = "Nested states sm" }
@@ -123,7 +122,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
     }
 
     fun testUmlMetaInfoTransitionNote() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = finalState("State2")
@@ -157,7 +156,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
 
     fun testUmlMetaInfoCompositeMetaInfo() {
         // buildCompositeMetaInfo vararg form — same rendering as direct buildUmlMetaInfo
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     metaInfo = buildCompositeMetaInfo(buildUmlMetaInfo { umlLabel = "My Machine" })
@@ -178,7 +177,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
     fun testShallowHistoryStateUsesPlantUmlPseudoStateNotation() {
         // history states must NOT appear as state declarations; transitions to
         // them use `parentId[H]` (shallow) or `parentId[H*]` (deep) notation.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     initialState("State2")
@@ -206,7 +205,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
     }
 
     fun testDeepHistoryStateUsesPlantUmlPseudoStateNotation() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     initialState("State2")
@@ -234,7 +233,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
     }
 
     fun testJoinDataTransitionRendersJoinPseudoState() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val afterJoin = dataState<String>("afterJoin")
@@ -288,7 +287,7 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
     }
 
     fun testJoinTransitionRendersJoinPseudoState() {
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val processing = state("processing")
@@ -340,29 +339,4 @@ class PlantUmlGeneratorTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    /**
-     * Pipeline harness: load [source] as a Kotlin file via the light fixture,
-     * run the parser, render the (single expected) machine via the generator,
-     * and compare against [expected]. Both arguments are passed through
-     * `trimIndent` so callers can use multi-line string literals naturally.
-     */
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { /* discard log output */ }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

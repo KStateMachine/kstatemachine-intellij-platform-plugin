@@ -1,9 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
-import com.github.nsk90.kstatemachineintellijplatformplugin.model.StateMachine
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests covering `metaInfo = buildUmlMetaInfo { … }` and `buildCompositeMetaInfo` parsing
@@ -46,7 +44,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // umlLabel replaces the state's display name in the diagram but leaves
         // the sanitized id (derived from the DSL name "S1") unchanged.
         // No descriptions or notes → no extra lines.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -69,7 +67,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // umlStateDescriptions emits `id : text` for each entry at the same
         // indent as the state declaration (leaf case). No label → display name
         // stays as the DSL name. No notes → no `note right of …` lines.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -95,7 +93,7 @@ class MetaInfoTest : BasePlatformTestCase() {
     fun testStateUmlNotesOnlyAddsNoteRightOfLines() {
         // umlNotes emits `note right of id : text` for each entry.
         // No label and no descriptions.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -122,7 +120,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // All three fields active simultaneously on a leaf state: label overrides
         // the display name; descriptions (id : …) and notes (note right of …) are
         // both appended at the same indent as the state declaration.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -154,7 +152,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // the `state { … }` block, before the children — mirroring
         // ExportPlantUmlVisitor.processStateBody. The id in the description rows
         // is the sanitized id ("Work"), not the label ("Working State").
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Work") {
@@ -190,7 +188,7 @@ class MetaInfoTest : BasePlatformTestCase() {
     fun testMetaInfoOnNestedStateIsIndependentFromParent() {
         // Each state carries its own UmlMetaInfo; parent and child labels are
         // applied independently without bleeding into each other.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     state("Parent") {
@@ -225,7 +223,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // `<…>` because the label text "Go to final" does not contain "Submit" as
         // a substring. The `contains` guard in transitionLabel prevents duplication
         // when the label already names the event (see testTransitionUmlLabelMatchingEventTypeIsNotDuplicated).
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val s2 = finalState("S2")
@@ -261,7 +259,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // When umlLabel equals the event type exactly, `explicit.contains(event)`
         // is true so the generator does NOT append `<EventType>` — the label is
         // emitted as-is. This mirrors ExportPlantUmlVisitor's deduplication guard.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val s2 = state("S2")
@@ -292,7 +290,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // `buildCompositeMetaInfo { metaInfoSet = setOf(buildUmlMetaInfo { … }) }` —
         // the builder form. The parser recurses through the `setOf(…)` call to
         // find the nested `buildUmlMetaInfo { … }` and extract its label.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     metaInfo = buildCompositeMetaInfo {
@@ -317,7 +315,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // all arguments through parseUmlMetaInfoFromExpr and returns the first
         // non-null result. Empty buildUmlMetaInfo{} produces null (no fields set)
         // and is filtered out by mapNotNull; the populated first arg wins.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val s2 = state("S2")
@@ -347,7 +345,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // buildUmlMetaInfo{} (producing null) the parser's mapNotNull keeps only
         // the second arg's result. This verifies that UmlMetaInfo need not be
         // the first positional argument to be detected.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     metaInfo = buildCompositeMetaInfo(buildUmlMetaInfo {}, buildUmlMetaInfo { umlLabel = "My Machine" })
@@ -370,7 +368,7 @@ class MetaInfoTest : BasePlatformTestCase() {
     fun testUmlLabelAppliedInMermaidMode() {
         // The umlLabel override applies in Mermaid mode exactly as in PlantUML —
         // the label becomes the display name in `state "label" as id`.
-        assertMermaid(
+        assertMermaid(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -394,7 +392,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // Mermaid stateDiagram-v2 has no `state : description` or
         // `note right of …` syntax. The generator suppresses both even when the
         // model carries them — only the label field takes effect in Mermaid mode.
-        assertMermaid(
+        assertMermaid(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -422,7 +420,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // `note on link` annotations are PlantUML-only — Mermaid stateDiagram-v2
         // has no equivalent construct. The generator skips them entirely in
         // Mermaid mode.
-        assertMermaid(
+        assertMermaid(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val s2 = state("S2")
@@ -454,7 +452,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // `buildUmlMetaInfo {}` with no fields assigned: parseUmlMetaInfoLambda
         // returns null when label is null AND both lists are empty. The diagram
         // is identical to the same state without any metaInfo assignment.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -476,7 +474,7 @@ class MetaInfoTest : BasePlatformTestCase() {
     fun testMultipleStatesHaveIndependentMetaInfo() {
         // Each state carries its own UmlMetaInfo instance. Labels, descriptions,
         // and notes from one sibling must not bleed into another sibling.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("S1") {
@@ -518,7 +516,7 @@ class MetaInfoTest : BasePlatformTestCase() {
         // not on the extension-invoke lambdas folded into extras.
         // This test freezes the current (limited) parser behaviour so any future
         // improvement would be visible as a deliberate change here.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val s1 = initialState("S1")
@@ -537,37 +535,4 @@ class MetaInfoTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val rendered = PlantUmlGenerator.render(parseSingleMachine(source)).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun assertMermaid(source: String, expected: String) {
-        val rendered = PlantUmlGenerator.render(
-            parseSingleMachine(source),
-            syntax = DiagramSyntax.MERMAID,
-        ).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun parseSingleMachine(source: String): StateMachine {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        return machines.single()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

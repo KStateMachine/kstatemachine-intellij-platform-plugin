@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests for `initialState`, `finalState`, `initialFinalState`,
@@ -33,7 +32,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
     fun testInitialStateSoleChildEmitsInitialArrow() {
         // A machine that contains only an initialState — the simplest fixture
         // for the [*] --> X arrow.  No final state, so no exit arrow is emitted.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("Ready")
@@ -55,7 +54,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
         // "<unnamed>" but assigns the Kotlin variable name ("ready") as its
         // bindingName.  preferredLabel() then surfaces "ready" as both the
         // display label and the sanitized id, so the diagram stays readable.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val ready = initialState()
@@ -76,7 +75,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
         // addInitialState(X) is the object-based form of initialState; the
         // parser maps it to StateKind.INITIAL via addStateKindFromCallee().
         // The generator must still emit [*] --> X inside the machine block.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     addInitialState(MyState)
@@ -98,7 +97,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
     fun testFinalStateSoleChildEmitsFinalArrowNoInitialArrow() {
         // A machine that contains only a finalState: X --> [*] is emitted but
         // there is no [*] --> X, because no sibling satisfies isInitial().
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     finalState("Done")
@@ -119,7 +118,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
         // When several finalState siblings coexist, every one gets its own
         // X --> [*] exit arrow.  The entry arrow is still a single [*] --> Start
         // pointing at the unique initialState.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialState("Start")
@@ -146,7 +145,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
         // addFinalState(X) is the object-based form of finalState; the parser
         // maps it to StateKind.FINAL via addStateKindFromCallee().  The generator
         // must emit X --> [*] in the enclosing block.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     addFinalState(DoneState)
@@ -169,7 +168,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
         // transition arrow are all rendered correctly in the same diagram.  The
         // states are declared via `val` bindings so target resolution goes
         // through resolveLocalInitializer().
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val done = finalState("Done")
@@ -197,7 +196,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
     fun testInitialFinalStateGetsBothArrows() {
         // initialFinalState satisfies both isInitial() and isFinal(), so the
         // generator must emit [*] --> X AND X --> [*] for the same state node.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     initialFinalState("done")
@@ -221,7 +220,7 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
         // is the KStateMachine FinishedEvent composition pattern: when the
         // parent reaches its internal final state it fires FinishedEvent, and
         // the parent itself carries the outgoing FinishedEvent transition.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -247,25 +246,4 @@ class InitialAndFinalStatesTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { /* discard log output */ }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

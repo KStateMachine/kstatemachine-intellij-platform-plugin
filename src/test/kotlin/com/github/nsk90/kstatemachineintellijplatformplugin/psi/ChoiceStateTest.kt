@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests covering `choiceState`, `initialChoiceState`, `choiceDataState`, and
@@ -43,7 +42,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // block), then `choice --> StateA` and `choice --> StateB` redirect
         // arrows in the global pass. The transition FROM Start TO the choice
         // state also renders normally.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val stateA = state("StateA")
@@ -78,7 +77,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // generator uses "Decide" as the diagram ID (sanitizeId strips nothing
         // here). The declaration is `state Decide <<choice>>` — no
         // `"display" as id` alias because stereotyped states don't need one.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val stateA = state("StateA")
@@ -112,7 +111,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // "myChoice". Transition target resolution for `targetState = myChoice`
         // falls back to the raw text "myChoice", which `resolveTarget` matches
         // against the state's `bindingName`.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val stateA = state("StateA")
@@ -147,7 +146,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         //   - `[*] --> Route` inside the machine block (initial entry arrow).
         //   - `Route --> StateA` and `Route --> StateB` in the global pass
         //     (choice redirect arrows).
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val stateA = state("StateA")
@@ -181,7 +180,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // confirming that the parser correctly classifies it as a CHOICE_DATA
         // kind (which passes `isChoice()`) and does not confuse it with a
         // DATA state that lacks the choice stereotype.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val stateA = state("StateA")
@@ -216,7 +215,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // satisfies both `isInitial()` and `isChoice()`. Same dual-arrow output
         // as `initialChoiceState`, with the data type argument silently ignored
         // by the diagram renderer.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val stateA = state("StateA")
@@ -247,7 +246,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // `extractDirectTargets` handles `KtWhenExpression` by visiting each
         // entry's body expression in turn. A three-branch when produces three
         // redirect arrows, one per resolved target, in source order.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val stateA = state("StateA")
@@ -292,7 +291,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // static target: `KtCallExpression` is not in the resolvable subset and
         // `targetFallbackText()` returns null for call expressions. The state
         // is still rendered as `<<choice>>`, but no redirect arrows are emitted.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val choice = choiceState {
@@ -326,7 +325,7 @@ class ChoiceStateTest : BasePlatformTestCase() {
         // the machine's block for `outer`. Both resolve correctly because
         // `findStateInSubtree` starts from the outermost ancestor (machine) and
         // can reach any state in the tree.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine("m") {
                     val outer = state("Outer")
@@ -356,25 +355,4 @@ class ChoiceStateTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { /* discard log output */ }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }

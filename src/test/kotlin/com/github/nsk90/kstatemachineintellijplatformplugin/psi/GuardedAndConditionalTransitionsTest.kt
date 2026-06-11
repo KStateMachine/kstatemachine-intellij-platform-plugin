@@ -1,8 +1,7 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.psi
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.kotest.matchers.shouldBe
-import org.jetbrains.kotlin.psi.KtFile
+
 
 /**
  * Tests for guarded transitions and conditional transitions.
@@ -36,7 +35,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
         // The guard lambda is parsed (isGuarded = true) but never included in
         // the diagram label. The arrow to the target renders exactly as it
         // would without the guard.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -64,7 +63,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
     fun testGuardedTransitionOnWithLambdaTarget() {
         // transitionOn { guard = {...}; targetState = { X } } — guard invisible,
         // target still resolved through the lambda via extractDirectTargets.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -93,7 +92,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
         // Multiple same-event transitionOns with different guards — the diagram
         // shows all possible targets regardless of guards (static analysis
         // cannot evaluate guards at parse time).
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -130,7 +129,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
     fun testTransitionOnIfElseBranchingRendersTwoSeparateArrows() {
         // extractDirectTargets walks both branches of the if/else and produces
         // two TargetGroups, each rendered as a separate arrow from State1.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -160,7 +159,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
     fun testTransitionOnWhenBranchingRendersAllArrows() {
         // extractDirectTargets walks every when-entry expression, producing one
         // TargetGroup per resolved branch — three arrows from State1.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val stateA = state("StateA")
@@ -201,7 +200,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
     fun testTransitionConditionallyWithSingleTargetStateRendersArrow() {
         // direction = { targetState(X) } — unconditional single-target direction
         // produces one TargetGroup and one arrow.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -228,7 +227,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
     fun testTransitionConditionallyStayRendersAsSelfLoop() {
         // stay() in the direction lambda maps to TargetGroup(isSelfLoop = true),
         // which the generator renders as a source-to-source arrow.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     initialState("State1") {
@@ -254,7 +253,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
         // noTransition() contributes no TargetGroup; the generator skips arrow
         // emission for transitionConditionally when targetGroups is empty
         // (unlike plain `transition` whose targetless form renders a self-loop).
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -281,7 +280,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
         // extractConditionalGroups finds both targetState() calls inside the
         // if/else — each produces a separate TargetGroup and arrow, unlike
         // transitionOn which uses extractDirectTargets for the same shape.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -314,7 +313,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
         // when-expression with all four direction outcomes: two targetState
         // calls produce arrows, stay() produces a self-loop, noTransition()
         // produces nothing — matching the ComplexSyntaxSample pattern.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val stateA = state("StateA")
@@ -354,7 +353,7 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
         // targets = [A, B]). The generator emits a <<fork>> pseudo-state
         // declaration inside the enclosing block and two outgoing arrows from
         // the fork, mirroring the fork half of a fork/join pattern.
-        assertPlantUml(
+        assertPlantUml(myFixture, 
             source = """
                 val machine = createStateMachine {
                     val state2 = state("State2")
@@ -382,23 +381,4 @@ class GuardedAndConditionalTransitionsTest : BasePlatformTestCase() {
             ),
         )
     }
-
-    private fun assertPlantUml(source: String, expected: String) {
-        val file = myFixture.configureByText("Test.kt", source.trimIndent()) as KtFile
-        val machines = PsiElementsParser { /* discard log output */ }.parse(file)
-        require(machines.size == 1) {
-            "Expected exactly one state machine in source, got ${machines.size}"
-        }
-        val rendered = PlantUmlGenerator.render(machines.single()).trim()
-        rendered shouldBe expected.trimIndent().trim()
-    }
-
-    private fun bodyTags(expected: String) = """
-        @startuml
-        top to bottom direction
-        hide empty description
-
-${expected.trimIndent().trim().prependIndent("        ")}
-        @enduml
-    """.trimIndent()
 }
