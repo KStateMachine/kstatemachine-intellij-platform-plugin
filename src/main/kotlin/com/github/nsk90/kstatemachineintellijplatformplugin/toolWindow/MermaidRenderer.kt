@@ -5,12 +5,18 @@ import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
 import java.awt.AWTEvent
+import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Toolkit
 import java.awt.event.AWTEventListener
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JSlider
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 import kotlin.math.roundToInt
 
 /**
@@ -29,11 +35,38 @@ import kotlin.math.roundToInt
  * **Drag handling** is done at the Java [AWTEventListener] level so that
  * panning works even when the cursor leaves the JCEF component — see the
  * equivalent note in [PlantUmlJsRenderer] for full details.
+ *
+ * **Zoom** is controlled by the [JSlider] at the bottom of the component,
+ * mirroring the implementation in [PlantUmlJsRenderer].
  */
 class MermaidRenderer {
 
     private val supported: Boolean = JBCefApp.isSupported()
     private val browser: JBCefBrowser? = if (supported) JBCefBrowser() else null
+
+    // ── Zoom slider ────────────────────────────────────────────────────────────
+
+    private val zoomSlider = JSlider(SwingConstants.HORIZONTAL, 70, 200, 100).apply {
+        preferredSize = Dimension(150, 20)
+        isFocusable = false
+    }
+    private val zoomLabel = JLabel("100%").apply {
+        preferredSize = Dimension(40, 16)
+    }
+    private val sliderPanel = JPanel(FlowLayout(FlowLayout.CENTER, 4, 2)).apply {
+        add(JLabel("Zoom:"))
+        add(zoomSlider)
+        add(zoomLabel)
+    }
+
+    // ── Wrapper panel (browser + slider) ───────────────────────────────────────
+
+    private val wrapper: JPanel? = browser?.let { b ->
+        JPanel(BorderLayout()).apply {
+            add(b.component, BorderLayout.CENTER)
+            add(sliderPanel, BorderLayout.SOUTH)
+        }
+    }
 
     // ── Java-level drag infrastructure ────────────────────────────────────────
 
@@ -60,9 +93,8 @@ class MermaidRenderer {
                 javaDragLastX = event.xOnScreen
                 javaDragLastY = event.yOnScreen
                 if (dx == 0 && dy == 0) return@AWTEventListener
-                val dpr = devicePixelRatio()
                 b.cefBrowser.executeJavaScript(
-                    "window.__ksmPan&&window.__ksmPan(${(dx / dpr).roundToInt()},${(dy / dpr).roundToInt()})",
+                    "window.__ksmPan&&window.__ksmPan($dx,$dy)",
                     "", 0,
                 )
             }
@@ -86,9 +118,6 @@ class MermaidRenderer {
         }
     }
 
-    private fun devicePixelRatio(): Double =
-        browser?.component?.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
-
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     init {
@@ -97,6 +126,14 @@ class MermaidRenderer {
                 awtMouseListener,
                 AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_MOTION_EVENT_MASK,
             )
+            zoomSlider.addChangeListener {
+                val pct = zoomSlider.value
+                zoomLabel.text = "$pct%"
+                browser.cefBrowser.executeJavaScript(
+                    "window.__ksmSetZoom&&window.__ksmSetZoom(${pct / 100.0})",
+                    "", 0,
+                )
+            }
         }
     }
 
@@ -123,6 +160,22 @@ class MermaidRenderer {
         }
     }
 
+    // ── Zoom sync bridge (JS → slider, fired by double-click fit) ─────────────
+
+    private val zoomSyncQuery: JBCefJSQuery? = browser?.let { b ->
+        @Suppress("DEPRECATION", "UnstableApiUsage")
+        JBCefJSQuery.create(b).apply {
+            addHandler { zoomStr ->
+                val pct = (zoomStr.toDoubleOrNull() ?: 100.0).roundToInt().coerceIn(70, 200)
+                SwingUtilities.invokeLater {
+                    zoomSlider.value = pct
+                    zoomLabel.text = "$pct%"
+                }
+                null
+            }
+        }
+    }
+
     // ── UI ────────────────────────────────────────────────────────────────────
 
     private val placeholder: JLabel = JLabel(
@@ -130,11 +183,16 @@ class MermaidRenderer {
         SwingConstants.CENTER,
     )
 
-    val component: JComponent get() = browser?.component ?: placeholder
+    val component: JComponent get() = wrapper ?: placeholder
 
     fun render(source: String, dark: Boolean) {
-        val b = browser ?: return
-        b.loadHTML(buildHtml(source, dark))
+        browser ?: return
+        SwingUtilities.invokeLater {
+            zoomSlider.value = 100
+            zoomLabel.text = "100%"
+        }
+        val notifyZoomCall = zoomSyncQuery?.inject("String(Math.round(zoom * 100))") ?: ""
+        browser.loadHTML(buildHtml(source, dark, notifyZoomCall))
     }
 
     fun showPlaceholder(message: String) {
@@ -148,7 +206,7 @@ class MermaidRenderer {
         currentSvg = null
     }
 
-    private fun buildHtml(source: String, dark: Boolean): String {
+    private fun buildHtml(source: String, dark: Boolean, notifyZoomCall: String): String {
         val mermaidJs = loadBundledMermaid()
         val theme = if (dark) "dark" else "default"
         val captureCall = svgCaptureQuery?.let { q ->
@@ -195,7 +253,7 @@ class MermaidRenderer {
                   }
                 })();
               </script>
-              <script>$panZoomScript</script>
+              <script>${buildPanZoomScript(notifyZoomCall)}</script>
             </body>
             </html>
         """.trimIndent()
@@ -224,9 +282,7 @@ class MermaidRenderer {
     }
 }
 
-// Identical to the script in PlantUmlJsRenderer — drag is handled by Java,
-// this script only wires up zoom and the three __ksm* callbacks.
-private val panZoomScript = """
+private fun buildPanZoomScript(notifyZoomCall: String): String = """
 (function() {
   var vp = document.getElementById('vp');
   var canvas = document.getElementById('canvas');
@@ -236,6 +292,8 @@ private val panZoomScript = """
     canvas.style.transform = 'translate('+panX+'px,'+panY+'px) scale('+zoom+')';
   }
 
+  function notifyZoom() { $notifyZoomCall }
+
   function fitToView() {
     canvas.style.transform = 'none';
     var cw = canvas.offsetWidth, ch = canvas.offsetHeight;
@@ -243,23 +301,19 @@ private val panZoomScript = """
     var vw = vp.clientWidth, vh = vp.clientHeight;
     var fit = Math.min(vw / cw, vh / ch);
     zoom = fit; panX = (vw - cw*fit)/2; panY = (vh - ch*fit)/2; apply();
+    notifyZoom();
   }
-
-  vp.addEventListener('wheel', function(e) {
-    e.preventDefault();
-    var norm = e.deltaMode === 1 ? 15 : e.deltaMode === 2 ? 300 : 1;
-    var f = Math.pow(0.999, e.deltaY * norm);
-    var r = vp.getBoundingClientRect();
-    var mx = e.clientX - r.left, my = e.clientY - r.top;
-    var nz = Math.min(10, Math.max(0.1, zoom * f));
-    panX = mx + (panX - mx) * (nz/zoom);
-    panY = my + (panY - my) * (nz/zoom);
-    zoom = nz; apply();
-  }, { passive: false });
 
   window.__ksmStartPan = function()       { vp.style.cursor = 'grabbing'; };
   window.__ksmPan      = function(dx, dy) { panX += dx; panY += dy; apply(); };
   window.__ksmEndPan   = function()       { vp.style.cursor = 'grab'; };
+  window.__ksmSetZoom  = function(nz) {
+    var vw = vp.clientWidth, vh = vp.clientHeight;
+    panX = vw/2 + (panX - vw/2) * (nz/zoom);
+    panY = vh/2 + (panY - vh/2) * (nz/zoom);
+    zoom = Math.min(2, Math.max(0.7, nz));
+    apply();
+  };
 
   vp.addEventListener('dblclick', function() { fitToView(); });
 })();

@@ -15,6 +15,9 @@ import org.cef.misc.StringRef
 import org.cef.network.CefRequest
 import org.cef.network.CefResponse
 import java.awt.AWTEvent
+import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Toolkit
 import java.awt.event.AWTEventListener
 import java.awt.event.MouseEvent
@@ -23,7 +26,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JSlider
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 import kotlin.math.roundToInt
 
 /**
@@ -48,30 +54,45 @@ import kotlin.math.roundToInt
  * the same origin and the scheme handler answers it — no CORS, no
  * file:// null-origin block.
  *
- * Earlier attempts and why they failed:
- *  - Inlining the JS into `loadHTML(html)`: JCEF routes loadHTML through an
- *    internal `data:` URL with a hard size limit; ~15 MB body silently
- *    truncated, page never executed.
- *  - Extracting to temp dir + `loadURL("file://…/page.html")`: Chromium
- *    treats file:// origins as null and refuses ES-module imports between
- *    sibling files.
- *  - `loadHTML(html, url)` + scheme handler: JBCefBrowser intercepts the
- *    overload and serves the HTML via its OWN `file:///jbcefbrowser/`
- *    factory, ignoring the URL argument we supplied for origin purposes.
- *
- * Rendered SVG flows back through a JS-to-Kotlin bridge ([currentSvg]) so the
- * Export action can save it without round-tripping through screenshot APIs.
- *
  * **Drag handling** is intentionally done at the Java [AWTEventListener] level
  * (not in JavaScript) so that panning continues smoothly even after the cursor
  * leaves the JCEF component boundary into the rest of the IDE. The listener
  * converts physical-pixel deltas to logical (CSS) pixels via the component's
  * device-pixel ratio and forwards them to JS via [CefBrowser.executeJavaScript].
+ *
+ * **Zoom** is controlled by the [JSlider] at the bottom of the component.
+ * The slider calls `window.__ksmSetZoom(value)` in JS, which scales around the
+ * viewport centre. Double-click still fits the diagram; the slider is updated
+ * via a [JBCefJSQuery] bridge so it stays in sync.
  */
 class PlantUmlJsRenderer {
 
     private val supported: Boolean = JBCefApp.isSupported()
     private val browser: JBCefBrowser? = if (supported) JBCefBrowser() else null
+
+    // ── Zoom slider ────────────────────────────────────────────────────────────
+
+    private val zoomSlider = JSlider(SwingConstants.HORIZONTAL, 70, 200, 100).apply {
+        preferredSize = Dimension(150, 20)
+        isFocusable = false
+    }
+    private val zoomLabel = JLabel("100%").apply {
+        preferredSize = Dimension(40, 16)
+    }
+    private val sliderPanel = JPanel(FlowLayout(FlowLayout.CENTER, 4, 2)).apply {
+        add(JLabel("Zoom:"))
+        add(zoomSlider)
+        add(zoomLabel)
+    }
+
+    // ── Wrapper panel (browser + slider) ───────────────────────────────────────
+
+    private val wrapper: JPanel? = browser?.let { b ->
+        JPanel(BorderLayout()).apply {
+            add(b.component, BorderLayout.CENTER)
+            add(sliderPanel, BorderLayout.SOUTH)
+        }
+    }
 
     // ── Java-level drag infrastructure ────────────────────────────────────────
 
@@ -98,9 +119,8 @@ class PlantUmlJsRenderer {
                 javaDragLastX = event.xOnScreen
                 javaDragLastY = event.yOnScreen
                 if (dx == 0 && dy == 0) return@AWTEventListener
-                val dpr = devicePixelRatio()
                 b.cefBrowser.executeJavaScript(
-                    "window.__ksmPan&&window.__ksmPan(${(dx / dpr).roundToInt()},${(dy / dpr).roundToInt()})",
+                    "window.__ksmPan&&window.__ksmPan($dx,$dy)",
                     "", 0,
                 )
             }
@@ -124,9 +144,6 @@ class PlantUmlJsRenderer {
         }
     }
 
-    private fun devicePixelRatio(): Double =
-        browser?.component?.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
-
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     init {
@@ -136,6 +153,14 @@ class PlantUmlJsRenderer {
                 awtMouseListener,
                 AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_MOTION_EVENT_MASK,
             )
+            zoomSlider.addChangeListener {
+                val pct = zoomSlider.value
+                zoomLabel.text = "$pct%"
+                browser.cefBrowser.executeJavaScript(
+                    "window.__ksmSetZoom&&window.__ksmSetZoom(${pct / 100.0})",
+                    "", 0,
+                )
+            }
         }
     }
 
@@ -162,6 +187,22 @@ class PlantUmlJsRenderer {
         }
     }
 
+    // ── Zoom sync bridge (JS → slider, fired by double-click fit) ─────────────
+
+    private val zoomSyncQuery: JBCefJSQuery? = browser?.let { b ->
+        @Suppress("DEPRECATION", "UnstableApiUsage")
+        JBCefJSQuery.create(b).apply {
+            addHandler { zoomStr ->
+                val pct = (zoomStr.toDoubleOrNull() ?: 100.0).roundToInt().coerceIn(70, 200)
+                SwingUtilities.invokeLater {
+                    zoomSlider.value = pct
+                    zoomLabel.text = "$pct%"
+                }
+                null
+            }
+        }
+    }
+
     // ── UI ────────────────────────────────────────────────────────────────────
 
     private val placeholder: JLabel = JLabel(
@@ -169,10 +210,14 @@ class PlantUmlJsRenderer {
         SwingConstants.CENTER,
     )
 
-    val component: JComponent get() = browser?.component ?: placeholder
+    val component: JComponent get() = wrapper ?: placeholder
 
     fun render(source: String, dark: Boolean) {
         val b = browser ?: return
+        SwingUtilities.invokeLater {
+            zoomSlider.value = 100
+            zoomLabel.text = "100%"
+        }
         val token = pageCounter.incrementAndGet()
         val html = buildHtml(source, dark)
         pendingPages[token] = html
@@ -194,6 +239,7 @@ class PlantUmlJsRenderer {
         val captureCall = svgCaptureQuery?.let { q ->
             "function captureSvg(svg) { ${q.inject("svg")} }"
         } ?: "function captureSvg() {}"
+        val notifyZoomCall = zoomSyncQuery?.inject("String(Math.round(zoom * 100))") ?: ""
         val sourceLiteral = source.toJsStringLiteral()
         val darkLiteral = if (dark) "true" else "false"
 
@@ -229,7 +275,7 @@ class PlantUmlJsRenderer {
                   d.textContent = 'PlantUML render error: ' + (e && e.message ? e.message : e);
                 }
               </script>
-              <script>$panZoomScript</script>
+              <script>${buildPanZoomScript(notifyZoomCall)}</script>
             </body>
             </html>
         """.trimIndent()
@@ -373,24 +419,7 @@ private fun String.toJsStringLiteral(): String {
     return sb.toString()
 }
 
-/**
- * Canvas pan/zoom — injected verbatim into every rendered page.
- *
- * **Scroll wheel (any direction, no modifier needed)** zooms toward the cursor.
- * Proportional scaling (`Math.pow(0.999, delta)`) works for both the coarse
- * steps of a mouse wheel (~100 delta/notch) and the fine steps of a trackpad
- * pinch (~2-5 delta/step). No Ctrl key required.
- *
- * **Drag** is handled entirely in Kotlin via [AWTEventListener] so that panning
- * continues after the cursor leaves the JCEF component. The Java side calls
- * `window.__ksmPan(dx, dy)` with logical-pixel deltas; this function updates
- * panX/panY and applies the transform directly (no rAF — `#canvas` carries
- * `will-change: transform` so the update is composited on the GPU without
- * triggering a CPU repaint).
- *
- * **Double-click** fits the diagram to the viewport.
- */
-private val panZoomScript = """
+private fun buildPanZoomScript(notifyZoomCall: String): String = """
 (function() {
   var vp = document.getElementById('vp');
   var canvas = document.getElementById('canvas');
@@ -400,6 +429,8 @@ private val panZoomScript = """
     canvas.style.transform = 'translate('+panX+'px,'+panY+'px) scale('+zoom+')';
   }
 
+  function notifyZoom() { $notifyZoomCall }
+
   function fitToView() {
     canvas.style.transform = 'none';
     var cw = canvas.offsetWidth, ch = canvas.offsetHeight;
@@ -407,26 +438,19 @@ private val panZoomScript = """
     var vw = vp.clientWidth, vh = vp.clientHeight;
     var fit = Math.min(vw / cw, vh / ch);
     zoom = fit; panX = (vw - cw*fit)/2; panY = (vh - ch*fit)/2; apply();
+    notifyZoom();
   }
-
-  vp.addEventListener('wheel', function(e) {
-    e.preventDefault();
-    var norm = e.deltaMode === 1 ? 15 : e.deltaMode === 2 ? 300 : 1;
-    // Cap effective delta: mouse wheel gives ~100 units/click, trackpad ~3 units/step.
-    // Without a cap, 0.995^100 ≈ 0.61 (too aggressive for mouse).
-    // With cap=60: 0.995^60 ≈ 0.74 (26% per click) and 0.995^3 ≈ 0.985 (1.5% per step).
-    var d = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY * norm), 60);
-    var f = Math.pow(0.995, d);
-    // #vp is position:absolute inset:0, so clientX/Y == cursor pos in viewport — no getBoundingClientRect needed.
-    var nz = Math.min(2, Math.max(0.7, zoom * f));
-    panX = e.clientX + (panX - e.clientX) * (nz / zoom);
-    panY = e.clientY + (panY - e.clientY) * (nz / zoom);
-    zoom = nz; apply();
-  }, { passive: false });
 
   window.__ksmStartPan = function()       { vp.style.cursor = 'grabbing'; };
   window.__ksmPan      = function(dx, dy) { panX += dx; panY += dy; apply(); };
   window.__ksmEndPan   = function()       { vp.style.cursor = 'grab'; };
+  window.__ksmSetZoom  = function(nz) {
+    var vw = vp.clientWidth, vh = vp.clientHeight;
+    panX = vw/2 + (panX - vw/2) * (nz/zoom);
+    panY = vh/2 + (panY - vh/2) * (nz/zoom);
+    zoom = Math.min(2, Math.max(0.7, nz));
+    apply();
+  };
 
   vp.addEventListener('dblclick', function() { fitToView(); });
 })();
