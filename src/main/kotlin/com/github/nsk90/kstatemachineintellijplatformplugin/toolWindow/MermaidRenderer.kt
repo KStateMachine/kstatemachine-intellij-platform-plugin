@@ -4,9 +4,14 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
+import java.awt.AWTEvent
+import java.awt.Toolkit
+import java.awt.event.AWTEventListener
+import java.awt.event.MouseEvent
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.SwingConstants
+import kotlin.math.roundToInt
 
 /**
  * JCEF-backed Mermaid renderer. Loads a tiny HTML page that includes the
@@ -20,12 +25,88 @@ import javax.swing.SwingConstants
  *
  * Exposes the rendered SVG via a JS-to-Kotlin bridge ([currentSvg]) so the
  * Export action can save it without round-tripping through screenshot APIs.
+ *
+ * **Drag handling** is done at the Java [AWTEventListener] level so that
+ * panning works even when the cursor leaves the JCEF component — see the
+ * equivalent note in [PlantUmlJsRenderer] for full details.
  */
 class MermaidRenderer {
 
     private val supported: Boolean = JBCefApp.isSupported()
-
     private val browser: JBCefBrowser? = if (supported) JBCefBrowser() else null
+
+    // ── Java-level drag infrastructure ────────────────────────────────────────
+
+    @Volatile private var javaDragging = false
+    private var javaDragLastX = 0
+    private var javaDragLastY = 0
+
+    private val awtMouseListener = AWTEventListener { event ->
+        if (event !is MouseEvent) return@AWTEventListener
+        val b = browser ?: return@AWTEventListener
+        when (event.id) {
+            MouseEvent.MOUSE_PRESSED -> {
+                if (event.button != MouseEvent.BUTTON1 || javaDragging) return@AWTEventListener
+                if (!isEventWithinBrowser(event)) return@AWTEventListener
+                javaDragging = true
+                javaDragLastX = event.xOnScreen
+                javaDragLastY = event.yOnScreen
+                b.cefBrowser.executeJavaScript("window.__ksmStartPan&&window.__ksmStartPan()", "", 0)
+            }
+            MouseEvent.MOUSE_DRAGGED -> {
+                if (!javaDragging) return@AWTEventListener
+                val dx = event.xOnScreen - javaDragLastX
+                val dy = event.yOnScreen - javaDragLastY
+                javaDragLastX = event.xOnScreen
+                javaDragLastY = event.yOnScreen
+                if (dx == 0 && dy == 0) return@AWTEventListener
+                val dpr = devicePixelRatio()
+                b.cefBrowser.executeJavaScript(
+                    "window.__ksmPan&&window.__ksmPan(${(dx / dpr).roundToInt()},${(dy / dpr).roundToInt()})",
+                    "", 0,
+                )
+            }
+            MouseEvent.MOUSE_RELEASED -> {
+                if (!javaDragging || event.button != MouseEvent.BUTTON1) return@AWTEventListener
+                javaDragging = false
+                b.cefBrowser.executeJavaScript("window.__ksmEndPan&&window.__ksmEndPan()", "", 0)
+            }
+        }
+    }
+
+    private fun isEventWithinBrowser(event: MouseEvent): Boolean {
+        val comp = browser?.component ?: return false
+        if (!comp.isShowing) return false
+        return try {
+            val loc = comp.locationOnScreen
+            event.xOnScreen in loc.x until (loc.x + comp.width) &&
+                event.yOnScreen in loc.y until (loc.y + comp.height)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun devicePixelRatio(): Double =
+        browser?.component?.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    init {
+        if (browser != null) {
+            Toolkit.getDefaultToolkit().addAWTEventListener(
+                awtMouseListener,
+                AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_MOTION_EVENT_MASK,
+            )
+        }
+    }
+
+    /** Must be called when the owning panel is disposed to remove the global AWT listener. */
+    fun dispose() {
+        Toolkit.getDefaultToolkit().removeAWTEventListener(awtMouseListener)
+        browser?.dispose()
+    }
+
+    // ── SVG capture bridge ────────────────────────────────────────────────────
 
     /** Last successfully captured SVG markup, updated by the in-page JS bridge. */
     @Volatile
@@ -33,9 +114,6 @@ class MermaidRenderer {
         private set
 
     private val svgCaptureQuery: JBCefJSQuery? = browser?.let { b ->
-        // The JBCefBrowserBase overload is the recommended one but the
-        // JBCefBrowser overload still works and the alternative requires
-        // platform-version-specific reflection. Acceptable deprecation cost.
         @Suppress("DEPRECATION", "UnstableApiUsage")
         JBCefJSQuery.create(b).apply {
             addHandler { svg ->
@@ -44,6 +122,8 @@ class MermaidRenderer {
             }
         }
     }
+
+    // ── UI ────────────────────────────────────────────────────────────────────
 
     private val placeholder: JLabel = JLabel(
         "JCEF runtime is not available in this IDE — Mermaid rendering is disabled.",
@@ -54,8 +134,7 @@ class MermaidRenderer {
 
     fun render(source: String, dark: Boolean) {
         val b = browser ?: return
-        val html = buildHtml(source, dark)
-        b.loadHTML(html)
+        b.loadHTML(buildHtml(source, dark))
     }
 
     fun showPlaceholder(message: String) {
@@ -73,12 +152,9 @@ class MermaidRenderer {
         val mermaidJs = loadBundledMermaid()
         val theme = if (dark) "dark" else "default"
         val captureCall = svgCaptureQuery?.let { q ->
-            // Inject the IPC callback so the rendered SVG flows back to Kotlin.
             "function captureSvg(svg) { ${q.inject("svg")} }"
         } ?: "function captureSvg() {}"
 
-        // Escape the source for safe embedding in a <pre> block. Mermaid reads
-        // it as text content, so we only need to escape `&`, `<`, `>`.
         val escapedSource = source
             .replace("&", "&amp;")
             .replace("<", "&lt;")
@@ -90,15 +166,19 @@ class MermaidRenderer {
             <head>
               <meta charset="UTF-8" />
               <style>
-                html, body { margin: 0; padding: 0; ${bodyStyle(dark)} }
-                .mermaid { padding: 12px; }
-                .err { padding: 16px; color: ${if (dark) "#ff8585" else "#b00020"};
+                html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; ${bodyStyle(dark)} }
+                #vp { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; cursor: grab; touch-action: none; }
+                #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; padding: 12px; will-change: transform; }
+                .mermaid svg { max-width: none !important; }
+                #err { position: fixed; top: 0; left: 0; right: 0; z-index: 9; display: none;
+                       padding: 16px; color: ${if (dark) "#ff8585" else "#b00020"};
+                       background: ${if (dark) "#2B2B2B" else "#FFFFFF"};
                        font-family: monospace; white-space: pre-wrap; }
               </style>
             </head>
             <body>
-              <pre class="mermaid">$escapedSource</pre>
-              <div id="err" class="err" style="display:none"></div>
+              <div id="vp"><div id="canvas"><pre class="mermaid">$escapedSource</pre></div></div>
+              <div id="err"></div>
               <script>$mermaidJs</script>
               <script>
                 $captureCall
@@ -115,6 +195,7 @@ class MermaidRenderer {
                   }
                 })();
               </script>
+              <script>$panZoomScript</script>
             </body>
             </html>
         """.trimIndent()
@@ -142,3 +223,44 @@ class MermaidRenderer {
         private var cachedMermaidJs: String? = null
     }
 }
+
+// Identical to the script in PlantUmlJsRenderer — drag is handled by Java,
+// this script only wires up zoom and the three __ksm* callbacks.
+private val panZoomScript = """
+(function() {
+  var vp = document.getElementById('vp');
+  var canvas = document.getElementById('canvas');
+  var zoom = 1, panX = 0, panY = 0;
+
+  function apply() {
+    canvas.style.transform = 'translate('+panX+'px,'+panY+'px) scale('+zoom+')';
+  }
+
+  function fitToView() {
+    canvas.style.transform = 'none';
+    var cw = canvas.offsetWidth, ch = canvas.offsetHeight;
+    if (cw <= 0 || ch <= 0) { zoom = 1; panX = 0; panY = 0; apply(); return; }
+    var vw = vp.clientWidth, vh = vp.clientHeight;
+    var fit = Math.min(vw / cw, vh / ch);
+    zoom = fit; panX = (vw - cw*fit)/2; panY = (vh - ch*fit)/2; apply();
+  }
+
+  vp.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var norm = e.deltaMode === 1 ? 15 : e.deltaMode === 2 ? 300 : 1;
+    var f = Math.pow(0.999, e.deltaY * norm);
+    var r = vp.getBoundingClientRect();
+    var mx = e.clientX - r.left, my = e.clientY - r.top;
+    var nz = Math.min(10, Math.max(0.1, zoom * f));
+    panX = mx + (panX - mx) * (nz/zoom);
+    panY = my + (panY - my) * (nz/zoom);
+    zoom = nz; apply();
+  }, { passive: false });
+
+  window.__ksmStartPan = function()       { vp.style.cursor = 'grabbing'; };
+  window.__ksmPan      = function(dx, dy) { panX += dx; panY += dy; apply(); };
+  window.__ksmEndPan   = function()       { vp.style.cursor = 'grab'; };
+
+  vp.addEventListener('dblclick', function() { fitToView(); });
+})();
+""".trimIndent()

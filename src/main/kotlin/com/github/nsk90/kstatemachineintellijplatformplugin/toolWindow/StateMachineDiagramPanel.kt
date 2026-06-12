@@ -118,6 +118,16 @@ class StateMachineDiagramPanel(private val project: Project) {
         syntaxSelector.selectedItem = currentSyntax
         syntaxSelector.addActionListener(syntaxSelectorListener)
         applyCard(currentSyntax)
+        // Remove the global AWT mouse listeners when this panel is removed from
+        // the Swing hierarchy (tool window closed / project closed).
+        rootPanel.addHierarchyListener { e ->
+            if (e.changeFlags and java.awt.event.HierarchyEvent.DISPLAYABILITY_CHANGED.toLong() != 0L
+                && !rootPanel.isDisplayable
+            ) {
+                plantUmlRenderer.dispose()
+                mermaidRenderer.dispose()
+            }
+        }
     }
 
     fun showPlaceholder(message: String) {
