@@ -41,6 +41,7 @@ class PlantUmlJsRenderer : JcefDiagramRenderer("PlantUML") {
 
     override fun render(source: String, dark: Boolean) {
         val b = browser ?: return
+        showCover()
         val token = pageCounter.incrementAndGet()
         pendingPages[token] = buildHtml(source, dark)
         b.loadURL("$BASE_URL$PAGE_PATH_PREFIX$token.html")
@@ -62,7 +63,7 @@ class PlantUmlJsRenderer : JcefDiagramRenderer("PlantUML") {
               <style>
                 html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; ${bodyStyle(dark)} }
                 #vp { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; cursor: grab; touch-action: none; }
-                #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; padding: 12px; will-change: transform; }
+                #canvas { position: absolute; top: 0; left: 0; padding: 12px; }
                 #err { position: fixed; top: 0; left: 0; right: 0; z-index: 9; display: none;
                        padding: 16px; color: ${if (dark) "#ff8585" else "#b00020"};
                        background: ${if (dark) "#2B2B2B" else "#FFFFFF"};
@@ -79,7 +80,10 @@ class PlantUmlJsRenderer : JcefDiagramRenderer("PlantUML") {
                   const mod = await import('./plantuml.js');
                   mod.render($sourceLiteral.split(/\r\n|\r|\n/), 'out', {dark: $darkLiteral});
                   const svg = document.querySelector('#out svg');
-                  if (svg) captureSvg(svg.outerHTML);
+                  if (svg) {
+                    captureSvg(svg.outerHTML);
+                    window.__ksmDiagramReady && window.__ksmDiagramReady();
+                  }
                 } catch (e) {
                   const d = document.getElementById('err');
                   d.style.display = 'block';

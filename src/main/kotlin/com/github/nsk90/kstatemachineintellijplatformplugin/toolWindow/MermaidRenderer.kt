@@ -16,6 +16,7 @@ class MermaidRenderer : JcefDiagramRenderer("Mermaid") {
 
     override fun render(source: String, dark: Boolean) {
         val b = browser ?: return
+        showCover()
         val notifyZoomCall = zoomSyncQuery?.inject("String(Math.round(zoom * 100))") ?: ""
         b.loadHTML(buildHtml(source, dark, notifyZoomCall))
     }
@@ -39,8 +40,7 @@ class MermaidRenderer : JcefDiagramRenderer("Mermaid") {
               <style>
                 html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; ${bodyStyle(dark)} }
                 #vp { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; cursor: grab; touch-action: none; }
-                #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; padding: 12px; will-change: transform; }
-                .mermaid svg { max-width: none !important; }
+                #canvas { position: absolute; top: 0; left: 0; padding: 12px; }
                 #err { position: fixed; top: 0; left: 0; right: 0; z-index: 9; display: none;
                        padding: 16px; color: ${if (dark) "#ff8585" else "#b00020"};
                        background: ${if (dark) "#2B2B2B" else "#FFFFFF"};
@@ -58,7 +58,10 @@ class MermaidRenderer : JcefDiagramRenderer("Mermaid") {
                   try {
                     await mermaid.run({ querySelector: '.mermaid' });
                     var svgEl = document.querySelector('.mermaid svg');
-                    if (svgEl) captureSvg(svgEl.outerHTML);
+                    if (svgEl) {
+                      captureSvg(svgEl.outerHTML);
+                      window.__ksmDiagramReady && window.__ksmDiagramReady();
+                    }
                   } catch (e) {
                     var d = document.getElementById('err');
                     d.style.display = 'block';
