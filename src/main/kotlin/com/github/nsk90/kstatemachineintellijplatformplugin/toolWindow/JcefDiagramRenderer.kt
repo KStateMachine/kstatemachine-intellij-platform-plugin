@@ -33,7 +33,7 @@ abstract class JcefDiagramRenderer(rendererName: String) {
 
     // ── Zoom slider ────────────────────────────────────────────────────────────
 
-    private val zoomSlider = JSlider(SwingConstants.HORIZONTAL, 70, 200, 100).apply {
+    private val zoomSlider = JSlider(SwingConstants.HORIZONTAL, 50, 200, 100).apply {
         preferredSize = Dimension(150, 20)
         isFocusable = false
     }
@@ -142,7 +142,7 @@ abstract class JcefDiagramRenderer(rendererName: String) {
         @Suppress("DEPRECATION", "UnstableApiUsage")
         JBCefJSQuery.create(b).apply {
             addHandler { zoomStr ->
-                val pct = (zoomStr.toDoubleOrNull() ?: 100.0).roundToInt().coerceIn(70, 200)
+                val pct = (zoomStr.toDoubleOrNull() ?: 100.0).roundToInt().coerceIn(50, 200)
                 SwingUtilities.invokeLater {
                     zoomSlider.value = pct
                     zoomLabel.text = "$pct%"
@@ -190,6 +190,16 @@ abstract class JcefDiagramRenderer(rendererName: String) {
   var canvas = document.getElementById('canvas');
   var zoom = 1, panX = 0, panY = 0;
 
+  // Keep at least 50 px of the diagram inside the viewport on every edge.
+  function clampPan() {
+    var cw = canvas.offsetWidth, ch = canvas.offsetHeight;
+    if (cw <= 0 || ch <= 0) return;
+    var margin = 50;
+    var vw = vp.clientWidth, vh = vp.clientHeight;
+    panX = Math.min(vw - margin, Math.max(margin - cw * zoom, panX));
+    panY = Math.min(vh - margin, Math.max(margin - ch * zoom, panY));
+  }
+
   function apply() {
     canvas.style.transform = 'translate('+panX+'px,'+panY+'px) scale('+zoom+')';
   }
@@ -207,14 +217,14 @@ abstract class JcefDiagramRenderer(rendererName: String) {
   }
 
   window.__ksmStartPan = function()       { vp.style.cursor = 'grabbing'; };
-  window.__ksmPan      = function(dx, dy) { panX += dx; panY += dy; apply(); };
+  window.__ksmPan      = function(dx, dy) { panX += dx; panY += dy; clampPan(); apply(); };
   window.__ksmEndPan   = function()       { vp.style.cursor = 'grab'; };
   window.__ksmSetZoom  = function(nz) {
     var vw = vp.clientWidth, vh = vp.clientHeight;
     panX = vw/2 + (panX - vw/2) * (nz/zoom);
     panY = vh/2 + (panY - vh/2) * (nz/zoom);
-    zoom = Math.min(2, Math.max(0.7, nz));
-    apply();
+    zoom = Math.min(2, Math.max(0.5, nz));
+    clampPan(); apply();
   };
 
   vp.addEventListener('dblclick', function() { fitToView(); });
