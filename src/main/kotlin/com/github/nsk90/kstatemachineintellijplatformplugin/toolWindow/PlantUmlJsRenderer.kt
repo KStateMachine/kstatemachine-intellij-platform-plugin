@@ -41,7 +41,6 @@ class PlantUmlJsRenderer : JcefDiagramRenderer("PlantUML") {
 
     override fun render(source: String, dark: Boolean) {
         val b = browser ?: return
-        resetZoom()
         val token = pageCounter.incrementAndGet()
         pendingPages[token] = buildHtml(source, dark)
         b.loadURL("$BASE_URL$PAGE_PATH_PREFIX$token.html")

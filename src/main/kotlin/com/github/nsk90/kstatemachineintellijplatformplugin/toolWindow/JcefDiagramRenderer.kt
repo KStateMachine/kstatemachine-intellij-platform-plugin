@@ -99,6 +99,10 @@ abstract class JcefDiagramRenderer(rendererName: String) {
         }
     }
 
+    // ── Remembered zoom (persists across diagram changes) ─────────────────────
+
+    @Volatile private var rememberedZoomPct: Int = 100
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     init {
@@ -110,6 +114,7 @@ abstract class JcefDiagramRenderer(rendererName: String) {
             zoomSlider.addChangeListener {
                 val pct = zoomSlider.value
                 zoomLabel.text = "$pct%"
+                rememberedZoomPct = pct
                 browser.cefBrowser.executeJavaScript(
                     "window.__ksmSetZoom&&window.__ksmSetZoom(${pct / 100.0})",
                     "", 0,
@@ -143,6 +148,7 @@ abstract class JcefDiagramRenderer(rendererName: String) {
         JBCefJSQuery.create(b).apply {
             addHandler { zoomStr ->
                 val pct = (zoomStr.toDoubleOrNull() ?: 100.0).roundToInt().coerceIn(50, 200)
+                rememberedZoomPct = pct
                 SwingUtilities.invokeLater {
                     zoomSlider.value = pct
                     zoomLabel.text = "$pct%"
@@ -173,13 +179,6 @@ abstract class JcefDiagramRenderer(rendererName: String) {
 
     // ── Shared helpers for subclasses ─────────────────────────────────────────
 
-    protected fun resetZoom() {
-        SwingUtilities.invokeLater {
-            zoomSlider.value = 100
-            zoomLabel.text = "100%"
-        }
-    }
-
     protected fun bodyStyle(dark: Boolean): String =
         "background:${if (dark) "#2B2B2B" else "#FFFFFF"};" +
             "color:${if (dark) "#DDDDDD" else "#000000"};"
@@ -188,7 +187,7 @@ abstract class JcefDiagramRenderer(rendererName: String) {
 (function() {
   var vp = document.getElementById('vp');
   var canvas = document.getElementById('canvas');
-  var zoom = 1, panX = 0, panY = 0;
+  var zoom = ${rememberedZoomPct / 100.0}, panX = 0, panY = 0;
 
   // Keep at least 50 px of the diagram inside the viewport on every edge.
   function clampPan() {
@@ -228,6 +227,8 @@ abstract class JcefDiagramRenderer(rendererName: String) {
   };
 
   vp.addEventListener('dblclick', function() { fitToView(); });
+
+  apply();
 })();
 """.trimIndent()
 

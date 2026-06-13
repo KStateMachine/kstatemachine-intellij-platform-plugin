@@ -18,11 +18,13 @@ import java.awt.CardLayout
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.event.ActionListener
+import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 
 private const val SYNTAX_PREF_KEY = "ksm.diagram.syntax"
+private const val ORTHO_LINES_PREF_KEY = "ksm.diagram.linetype.ortho"
 private const val PLANTUML_CARD = "plantuml"
 private const val MERMAID_CARD = "mermaid"
 
@@ -73,16 +75,23 @@ class StateMachineDiagramPanel(private val project: Project) {
         if (newSyntax == currentSyntax) return@ActionListener
         currentSyntax = newSyntax
         PropertiesComponent.getInstance().setValue(SYNTAX_PREF_KEY, newSyntax.name)
+        orthoLinesCheckBox.isVisible = (newSyntax == DiagramSyntax.PLANTUML)
         applyCard(newSyntax)
         // Force a re-render (cache key now mismatches because syntax changed).
         lastRenderedSource = null
         renderSelected()
     }
 
+    private val orthoLinesCheckBox = JCheckBox("Ortho lines").apply {
+        isSelected = PropertiesComponent.getInstance().getBoolean(ORTHO_LINES_PREF_KEY, false)
+        toolTipText = "Add 'skinparam linetype ortho' to the PlantUML diagram"
+    }
+
     private val topBar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
         add(JLabel("Renderer:"))
         add(syntaxSelector)
         add(machineSelector)
+        add(orthoLinesCheckBox)
     }
 
     private val rootPanel = JPanel(BorderLayout()).apply {
@@ -117,6 +126,12 @@ class StateMachineDiagramPanel(private val project: Project) {
         machineSelector.addActionListener(machineSelectorListener)
         syntaxSelector.selectedItem = currentSyntax
         syntaxSelector.addActionListener(syntaxSelectorListener)
+        orthoLinesCheckBox.isVisible = (currentSyntax == DiagramSyntax.PLANTUML)
+        orthoLinesCheckBox.addActionListener {
+            PropertiesComponent.getInstance().setValue(ORTHO_LINES_PREF_KEY, orthoLinesCheckBox.isSelected)
+            lastRenderedSource = null
+            renderSelected()
+        }
         applyCard(currentSyntax)
         // Remove the global AWT mouse listeners when this panel is removed from
         // the Swing hierarchy (tool window closed / project closed).
@@ -224,7 +239,10 @@ class StateMachineDiagramPanel(private val project: Project) {
 
     private fun renderMachine(machine: StateMachine) {
         val dark = !JBColor.isBright()
-        val source = PlantUmlGenerator.render(machine, darkTheme = dark, syntax = currentSyntax)
+        var source = PlantUmlGenerator.render(machine, darkTheme = dark, syntax = currentSyntax)
+        if (currentSyntax == DiagramSyntax.PLANTUML && orthoLinesCheckBox.isSelected) {
+            source = injectAfterFirstLine(source, "skinparam linetype ortho")
+        }
         currentPlantUml = source
         updateSourceArea(source)
 
@@ -235,6 +253,12 @@ class StateMachineDiagramPanel(private val project: Project) {
             DiagramSyntax.PLANTUML -> plantUmlRenderer.render(source, dark)
             DiagramSyntax.MERMAID -> mermaidRenderer.render(source, dark)
         }
+    }
+
+    private fun injectAfterFirstLine(source: String, line: String): String {
+        val nl = source.indexOf('\n')
+        if (nl < 0) return source
+        return source.substring(0, nl + 1) + line + "\n" + source.substring(nl + 1)
     }
 
     private fun updateSourceArea(text: String) {

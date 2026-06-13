@@ -16,7 +16,6 @@ class MermaidRenderer : JcefDiagramRenderer("Mermaid") {
 
     override fun render(source: String, dark: Boolean) {
         val b = browser ?: return
-        resetZoom()
         val notifyZoomCall = zoomSyncQuery?.inject("String(Math.round(zoom * 100))") ?: ""
         b.loadHTML(buildHtml(source, dark, notifyZoomCall))
     }
