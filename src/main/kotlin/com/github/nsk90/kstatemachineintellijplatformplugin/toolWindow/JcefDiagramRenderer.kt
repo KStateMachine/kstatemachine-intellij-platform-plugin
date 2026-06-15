@@ -14,6 +14,7 @@ import java.awt.Toolkit
 import java.awt.event.AWTEventListener
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
+import java.awt.event.HierarchyEvent
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -97,6 +98,30 @@ abstract class JcefDiagramRenderer(rendererName: String) {
                 browserSwingSize = Dimension(c.width, c.height)
             }
         })
+        // When the wrapper (i.e. the renderer's whole UI) becomes showing
+        // — typically after the user switches back to the diagram/playground
+        // tab from another tab — the tool window may have been resized while
+        // we were hidden. Refresh JS-side state so the layout matches the
+        // current viewport again.
+        wrapper?.addHierarchyListener { e ->
+            val mask = HierarchyEvent.SHOWING_CHANGED.toLong()
+            if (e.changeFlags and mask != 0L && wrapper.isShowing) {
+                SwingUtilities.invokeLater { refreshAfterTabActivation() }
+            }
+        }
+    }
+
+    private fun refreshAfterTabActivation() {
+        val b = browser ?: return
+        val c = b.component
+        val w = c.width
+        val h = c.height
+        if (w <= 0 || h <= 0) return
+        browserSwingSize = Dimension(w, h)
+        b.cefBrowser.executeJavaScript(
+            "if (window.__ksmRefreshVp) window.__ksmRefreshVp($w, $h)",
+            "", 0,
+        )
     }
 
     protected fun showCover() {
@@ -440,6 +465,25 @@ abstract class JcefDiagramRenderer(rendererName: String) {
     });
     ro.observe(vp);
   }
+
+  // Called from Java when the renderer's wrapper becomes visible again
+  // after a tab switch. The tool window may have been resized while we
+  // were hidden; refresh the fallback viewport size and either re-center
+  // (if user hasn't pinned a position) or just re-clamp the existing pan.
+  window.__ksmRefreshVp = function(w, h) {
+    FALLBACK_VP_W = w;
+    FALLBACK_VP_H = h;
+    if (naturalW <= 0) return;
+    if (!userTouched) {
+      panX = Math.max(0, (w - naturalW * zoom - 24) / 2);
+      panY = Math.max(0, (h - naturalH * zoom - 24) / 2);
+      applyPan();
+      autoCentered = true;
+    } else {
+      clampPan();
+      applyPan();
+    }
+  };
 
   window.__ksmStartPan = function()       { vp.style.cursor = 'grabbing'; };
   window.__ksmPan      = function(dx, dy) {
