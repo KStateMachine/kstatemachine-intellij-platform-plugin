@@ -87,7 +87,7 @@ class StateMachineDiagramPanel(private val project: Project) {
         toolTipText = "Add 'skinparam linetype ortho' to the PlantUML diagram"
     }
 
-    private val topBar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+    private val topBar = JPanel(WrapLayout(FlowLayout.LEFT, 4, 2)).apply {
         add(JLabel("Renderer:"))
         add(syntaxSelector)
         add(machineSelector)

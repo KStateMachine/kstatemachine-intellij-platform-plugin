@@ -89,7 +89,7 @@ class PlantUmlPlaygroundPanel {
         rerender()
     }
 
-    private val topBar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+    private val topBar = JPanel(WrapLayout(FlowLayout.LEFT, 4, 2)).apply {
         add(JLabel("Renderer:"))
         add(syntaxSelector)
     }

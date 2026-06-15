@@ -6,6 +6,7 @@ import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefJSQuery
 import java.awt.AWTEvent
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -16,7 +17,6 @@ import java.awt.event.ComponentEvent
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
 import javax.swing.JLabel
-import javax.swing.JLayeredPane
 import javax.swing.JPanel
 import javax.swing.JSlider
 import javax.swing.SwingConstants
@@ -45,59 +45,78 @@ abstract class JcefDiagramRenderer(rendererName: String) {
     private val zoomLabel = JLabel("100%").apply {
         preferredSize = Dimension(40, 16)
     }
-    private val sliderPanel = JPanel(FlowLayout(FlowLayout.CENTER, 4, 2)).apply {
+    private val sliderPanel = JPanel(WrapLayout(FlowLayout.CENTER, 4, 2)).apply {
         add(JLabel("Zoom:"))
         add(zoomSlider)
         add(zoomLabel)
     }
     // ── Cover panel ────────────────────────────────────────────────────────────
-    // Opaque Swing panel laid on top of the JCEF browser via JLayeredPane.
-    // Shown while render() is loading new HTML so the user never sees the
-    // old page's last frame or the engine's intermediate render passes;
-    // hidden again when JS signals via [readySignalQuery] that the diagram
-    // is sized and centered.
+    // Opaque Swing panel swapped in via CardLayout to fully replace the JCEF
+    // browser visually during render transitions. CardLayout (not JLayeredPane)
+    // is used because JCEF browsers don't reliably compose under Swing's
+    // Z-order across platforms — the cover would not actually mask the
+    // browser. Hiding the browser via CardLayout works on every platform.
+    // The CEF render process keeps rendering off-screen while the Swing
+    // component is hidden, so when we swap back the new diagram is ready.
 
     private val coverPanel = JPanel().apply {
         isOpaque = true
         background = coverBackground()
-        isVisible = false
     }
 
     private fun coverBackground(): Color =
         if (JBColor.isBright()) Color(0xFF, 0xFF, 0xFF) else Color(0x2B, 0x2B, 0x2B)
 
-    private val browserStack: JLayeredPane? = browser?.let { b ->
-        val bc = b.component
-        val pane = JLayeredPane()
-        pane.add(bc, JLayeredPane.DEFAULT_LAYER)
-        pane.add(coverPanel, JLayeredPane.PALETTE_LAYER)
-        pane.addComponentListener(object : ComponentAdapter() {
-            override fun componentResized(e: ComponentEvent) {
-                val w = pane.width; val h = pane.height
-                bc.setBounds(0, 0, w, h)
-                coverPanel.setBounds(0, 0, w, h)
-            }
-        })
-        pane
+    private val browserHolderLayout = CardLayout()
+    private val browserHolder: JPanel? = browser?.let { b ->
+        JPanel(browserHolderLayout).apply {
+            add(b.component, BROWSER_CARD)
+            add(coverPanel, COVER_CARD)
+            browserHolderLayout.show(this, BROWSER_CARD)
+        }
     }
 
-    private val wrapper: JPanel? = browserStack?.let { stack ->
+    private val wrapper: JPanel? = browserHolder?.let { holder ->
         JPanel(BorderLayout()).apply {
-            add(stack, BorderLayout.CENTER)
+            add(holder, BorderLayout.CENTER)
             add(sliderPanel, BorderLayout.SOUTH)
         }
     }
 
+    // Tracks the Swing-side known size of the JCEF browser. Used as a
+    // fallback centering reference when vp.clientWidth in JS is still 0
+    // (CEF can lag a few frames behind the Java resize). Updated whenever
+    // the browser component is resized.
+    @Volatile
+    private var browserSwingSize: Dimension = Dimension(0, 0)
+
+    init {
+        browser?.component?.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent) {
+                val c = browser.component
+                browserSwingSize = Dimension(c.width, c.height)
+            }
+        })
+    }
+
     protected fun showCover() {
-        val show = {
+        val show: () -> Unit = {
             coverPanel.background = coverBackground()
-            coverPanel.isVisible = true
+            browserHolder?.let { browserHolderLayout.show(it, COVER_CARD) }
+            Unit
         }
         if (SwingUtilities.isEventDispatchThread()) show() else SwingUtilities.invokeLater(show)
     }
 
     private fun hideCover() {
-        SwingUtilities.invokeLater { coverPanel.isVisible = false }
+        SwingUtilities.invokeLater {
+            browserHolder?.let { browserHolderLayout.show(it, BROWSER_CARD) }
+        }
+    }
+
+    companion object {
+        private const val BROWSER_CARD = "browser"
+        private const val COVER_CARD = "cover"
     }
 
     // ── Java-level drag infrastructure ────────────────────────────────────────
@@ -241,6 +260,12 @@ abstract class JcefDiagramRenderer(rendererName: String) {
         // Mermaid values are naturally tracked separately.
         val initialZoom = zoomSlider.value / 100.0
         val notifyReadyCall = readySignalQuery?.inject("") ?: ""
+        // Swing-side known size of the browser. If the renderer was never
+        // shown (browser size still 0), use a reasonable default so JS can
+        // still center the diagram off-screen-correct relative to the
+        // viewport it'll eventually have.
+        val fallbackVpW = browserSwingSize.width.takeIf { it > 0 } ?: 800
+        val fallbackVpH = browserSwingSize.height.takeIf { it > 0 } ?: 600
         return """
 (function() {
   var vp = document.getElementById('vp');
@@ -257,6 +282,15 @@ abstract class JcefDiagramRenderer(rendererName: String) {
   var revealed = false;
   var notifiedReady = false;
   var pollStarted = false;
+
+  // Swing-side known viewport size, baked in by Kotlin. Used as a fallback
+  // when vp.clientWidth/Height in JS lag behind (CEF often reports 0 for the
+  // first few frames after a card switch — the actual Swing component does
+  // have a non-zero size).
+  var FALLBACK_VP_W = $fallbackVpW;
+  var FALLBACK_VP_H = $fallbackVpH;
+  function effectiveVpW() { return vp.clientWidth  > 0 ? vp.clientWidth  : FALLBACK_VP_W; }
+  function effectiveVpH() { return vp.clientHeight > 0 ? vp.clientHeight : FALLBACK_VP_H; }
 
   function getSvg() { return canvas.querySelector('svg'); }
 
@@ -316,14 +350,14 @@ abstract class JcefDiagramRenderer(rendererName: String) {
   function clampPan() {
     var cw = canvas.offsetWidth, ch = canvas.offsetHeight;
     if (cw <= 0 || ch <= 0) return;
-    var margin = 50, vw = vp.clientWidth, vh = vp.clientHeight;
+    var margin = 50, vw = effectiveVpW(), vh = effectiveVpH();
     panX = Math.min(vw - margin, Math.max(margin - cw, panX));
     panY = Math.min(vh - margin, Math.max(margin - ch, panY));
   }
 
   function fitToView() {
     if (naturalW === 0) return;
-    var vw = vp.clientWidth, vh = vp.clientHeight;
+    var vw = effectiveVpW(), vh = effectiveVpH();
     zoom = Math.min(2, Math.max(0.5, Math.min(vw / (naturalW + 24), vh / (naturalH + 24))));
     applyZoom();
     panX = Math.max(0, (vw - naturalW * zoom - 24) / 2);
@@ -334,12 +368,12 @@ abstract class JcefDiagramRenderer(rendererName: String) {
     notifyZoom();
   }
 
-  // Centers the diagram only if the user hasn't already touched it and the
-  // viewport has a real size. Called on init and again when the viewport
-  // gains size (e.g. the previously-hidden Mermaid card becomes visible).
+  // Centers the diagram using the effective viewport size (which falls back
+  // to the Swing-known size if vp.clientWidth is still 0). This way init
+  // always centers correctly, even if the JCEF viewport hasn't updated yet.
   function centerIfPossible() {
     if (autoCentered || userTouched || naturalW === 0) return;
-    var vw = vp.clientWidth, vh = vp.clientHeight;
+    var vw = effectiveVpW(), vh = effectiveVpH();
     if (vw <= 0 || vh <= 0) return;
     panX = Math.max(0, (vw - naturalW * zoom - 24) / 2);
     panY = Math.max(0, (vh - naturalH * zoom - 24) / 2);
@@ -413,7 +447,7 @@ abstract class JcefDiagramRenderer(rendererName: String) {
   };
   window.__ksmEndPan   = function()       { vp.style.cursor = 'grab'; };
   window.__ksmSetZoom  = function(nz) {
-    var cx = vp.clientWidth / 2, cy = vp.clientHeight / 2;
+    var cx = effectiveVpW() / 2, cy = effectiveVpH() / 2;
     panX = cx + (panX - cx) * (nz / zoom);
     panY = cy + (panY - cy) * (nz / zoom);
     zoom = Math.min(2, Math.max(0.5, nz));
