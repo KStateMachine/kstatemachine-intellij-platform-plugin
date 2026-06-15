@@ -246,10 +246,29 @@ abstract class JcefDiagramRenderer(rendererName: String) {
 
     // ── Ready signal bridge (JS → Java hideCover) ────────────────────────────
 
+    @Volatile
+    private var onReadyOnce: (() -> Unit)? = null
+
+    /**
+     * Registers a one-shot callback fired the next time the engine signals
+     * readiness. Used by the host panels to defer a parent CardLayout swap
+     * until the new diagram is fully rendered, eliminating the flash through
+     * the gray cover panel during a mode switch.
+     */
+    fun runOnNextReady(callback: () -> Unit) {
+        onReadyOnce = callback
+    }
+
     protected val readySignalQuery: JBCefJSQuery? = browser?.let { b ->
         @Suppress("DEPRECATION", "UnstableApiUsage")
         JBCefJSQuery.create(b).apply {
-            addHandler { _ -> hideCover(); null }
+            addHandler { _ ->
+                hideCover()
+                val cb = onReadyOnce
+                onReadyOnce = null
+                if (cb != null) SwingUtilities.invokeLater(cb)
+                null
+            }
         }
     }
 

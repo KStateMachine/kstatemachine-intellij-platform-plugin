@@ -76,10 +76,24 @@ class StateMachineDiagramPanel(private val project: Project) {
         currentSyntax = newSyntax
         PropertiesComponent.getInstance().setValue(SYNTAX_PREF_KEY, newSyntax.name)
         orthoLinesCheckBox.isVisible = (newSyntax == DiagramSyntax.PLANTUML)
-        applyCard(newSyntax)
         // Force a re-render (cache key now mismatches because syntax changed).
         lastRenderedSource = null
-        renderSelected()
+        // Defer the imageArea card swap until the new renderer has fully
+        // rendered. The old card stays visible while the new browser loads
+        // (hidden) in the background, so the user sees a single direct
+        // transition rather than a flash through the gray cover panel.
+        if (currentMachines.isEmpty()) {
+            applyCard(newSyntax)
+        } else {
+            val newRenderer = when (newSyntax) {
+                DiagramSyntax.PLANTUML -> plantUmlRenderer
+                DiagramSyntax.MERMAID -> mermaidRenderer
+            }
+            newRenderer.runOnNextReady {
+                if (currentSyntax == newSyntax) applyCard(newSyntax)
+            }
+            renderSelected()
+        }
     }
 
     private val orthoLinesCheckBox = JCheckBox("Ortho lines").apply {

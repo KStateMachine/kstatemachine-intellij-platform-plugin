@@ -85,8 +85,24 @@ class PlantUmlPlaygroundPanel {
             sourceArea.text = buildSampleTemplate(newSyntax)
             sourceArea.caretPosition = 0
         }
-        applyCard(newSyntax)
-        rerender()
+        // Defer the imageArea card swap until the new renderer is ready,
+        // so the user sees a single direct transition rather than a flash
+        // through the gray cover panel. If the source is empty we'd show
+        // a placeholder (no ready signal will fire) — swap right away.
+        val source = sourceArea.text.trim()
+        if (source.isEmpty()) {
+            applyCard(newSyntax)
+            rerender()
+        } else {
+            val newRenderer = when (newSyntax) {
+                DiagramSyntax.PLANTUML -> plantUmlRenderer
+                DiagramSyntax.MERMAID -> mermaidRenderer
+            }
+            newRenderer.runOnNextReady {
+                if (currentSyntax == newSyntax) applyCard(newSyntax)
+            }
+            rerender()
+        }
     }
 
     private val topBar = JPanel(WrapLayout(FlowLayout.LEFT, 4, 2)).apply {
