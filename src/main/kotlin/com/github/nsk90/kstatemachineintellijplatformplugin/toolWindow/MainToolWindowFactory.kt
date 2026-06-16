@@ -48,6 +48,13 @@ class MainToolWindowFactory : ToolWindowFactory {
     @Volatile
     private var currentFile: VirtualFile? = null
 
+    // Tracks the most recently requested tab switch target. Set before the
+    // background parse starts so that if a second switch arrives while the
+    // first parse is still running, the first result is discarded rather than
+    // overwriting the newer view.
+    @Volatile
+    private var pendingSwitchFile: VirtualFile? = null
+
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         this.project = project
         treePanel = StateMachineTreePanel(project)
@@ -119,9 +126,14 @@ class MainToolWindowFactory : ToolWindowFactory {
     // contains machines. Otherwise keep the previous view so the user can browse
     // helper files while keeping the state-machine structure on screen.
     private fun onTabSwitched(file: VirtualFile) {
+        pendingSwitchFile = file
         runTaskWithProgress(project) {
             val machines = parseFileOrNull(file) ?: return@runTaskWithProgress
             if (machines.isEmpty()) return@runTaskWithProgress
+            // A newer switch arrived while we were parsing — discard this result
+            // rather than overwriting the view that the more recent switch already
+            // painted (or is about to paint).
+            if (file != pendingSwitchFile) return@runTaskWithProgress
             currentFile = file
             applyToUi(machines)
         }
@@ -135,6 +147,11 @@ class MainToolWindowFactory : ToolWindowFactory {
         if (file != currentFile) return
         runTaskWithProgress(project) {
             val machines = parseFileOrNull(file) ?: emptyList()
+            // If the user switched to a different file while we were parsing,
+            // do not overwrite their new view with this file's stale result.
+            // Without this check the tree would show the edited file's machines
+            // but currentFile would point elsewhere, breaking caret navigation.
+            if (file != currentFile) return@runTaskWithProgress
             applyToUi(machines)
         }
     }
