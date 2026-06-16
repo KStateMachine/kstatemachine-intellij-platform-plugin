@@ -41,6 +41,19 @@ class MermaidRenderer : JcefDiagramRenderer("Mermaid") {
                 html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; ${bodyStyle(dark)} }
                 #vp { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; cursor: grab; touch-action: none; }
                 #canvas { position: absolute; top: 0; left: 0; padding: 12px; }
+                /* Off-screen + hidden host where mermaid.run does its work. The
+                   raw source text and Mermaid's intermediate render passes
+                   never enter the visible viewport, so the first paint inside
+                   #canvas is the final SVG that we move there ourselves. */
+                #mermaid-host {
+                  position: absolute;
+                  left: -10000px;
+                  top: -10000px;
+                  width: 1px;
+                  height: 1px;
+                  overflow: hidden;
+                  visibility: hidden;
+                }
                 #err { position: fixed; top: 0; left: 0; right: 0; z-index: 9; display: none;
                        padding: 16px; color: ${if (dark) "#ff8585" else "#b00020"};
                        background: ${if (dark) "#2B2B2B" else "#FFFFFF"};
@@ -48,17 +61,23 @@ class MermaidRenderer : JcefDiagramRenderer("Mermaid") {
               </style>
             </head>
             <body>
-              <div id="vp"><div id="canvas"><pre class="mermaid">$escapedSource</pre></div></div>
+              <div id="vp"><div id="canvas"></div></div>
               <div id="err"></div>
+              <div id="mermaid-host"><pre class="mermaid">$escapedSource</pre></div>
               <script>$mermaidJs</script>
               <script>
                 $captureCall
                 mermaid.initialize({ startOnLoad: false, theme: '$theme', securityLevel: 'loose' });
                 (async () => {
                   try {
-                    await mermaid.run({ querySelector: '.mermaid' });
-                    var svgEl = document.querySelector('.mermaid svg');
+                    await mermaid.run({ querySelector: '#mermaid-host .mermaid' });
+                    var svgEl = document.querySelector('#mermaid-host svg');
                     if (svgEl) {
+                      // Move the final SVG into the visible canvas in a single
+                      // DOM operation. Centering/sizing happens synchronously
+                      // in __ksmDiagramReady before the browser paints, so
+                      // the very first visible frame is the final state.
+                      document.getElementById('canvas').appendChild(svgEl);
                       captureSvg(svgEl.outerHTML);
                       window.__ksmDiagramReady && window.__ksmDiagramReady();
                     }
