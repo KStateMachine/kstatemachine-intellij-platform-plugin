@@ -38,8 +38,18 @@ private const val DEFAULT_DATA_ARGUMENT = "defaultData"
 private const val TARGET_STATE_PROPERTY = "targetState"
 private const val GUARD_PROPERTY = "guard"
 private const val DIRECTION_PROPERTY = "direction"
-private const val TRANSITION_CONDITIONALLY_CALLEE = "transitionConditionally"
-private val JOIN_TRANSITION_CALLEES = setOf("joinTransition", "joinDataTransition")
+private val CONDITIONALLY_CALLEES = setOf(
+    "transitionConditionally", "autoTransitionConditionally", "joinTransitionConditionally"
+)
+private val JOIN_TRANSITION_CALLEES = setOf(
+    "joinTransition", "joinDataTransition",
+    "joinTransitionOn", "joinTransitionConditionally",
+    "joinDataTransitionOn",
+)
+private val FIRST_TYPE_ARG_DATA_CALLEES = setOf(
+    "joinDataTransition", "joinDataTransitionOn",
+    "autoDataTransition", "autoDataTransitionOn",
+)
 private const val META_INFO_PROPERTY = "metaInfo"
 private const val BUILD_UML_META_INFO = "buildUmlMetaInfo"
 private const val BUILD_COMPOSITE_META_INFO = "buildCompositeMetaInfo"
@@ -194,10 +204,11 @@ class PsiElementsParser(private val output: Output) {
                             )
                         } else null,
                         // dataTransition<E, D> / dataTransitionOn<E, D> — D is the 2nd type arg.
-                        // joinDataTransition<D> — D is the 1st (no event type arg).
+                        // joinDataTransition / joinDataTransitionOn / autoDataTransition /
+                        // autoDataTransitionOn — D is the 1st type arg (no event type arg).
                         dataType = when {
                             calleeText in DATA_TRANSITION_CALLEES -> call.typeArguments.getOrNull(1)?.text
-                            calleeText == "joinDataTransition" -> call.typeArguments.firstOrNull()?.text
+                            calleeText in FIRST_TYPE_ARG_DATA_CALLEES -> call.typeArguments.firstOrNull()?.text
                             else -> null
                         },
                         joinSources = if (calleeText in JOIN_TRANSITION_CALLEES)
@@ -445,17 +456,50 @@ private fun KtExpression.extractStringList(): List<String> {
 }
 
 /**
- * For `joinTransition(s1, s2, …, name = …, targetState = …)`, collect the
- * positional (unnamed) arguments — those are the vararg join-point state
- * references. Named args (`name`, `targetState`) are excluded.
+ * Collect join-point state references from any of the three calling forms:
+ *
+ *   1. Vararg: `joinTransition(s1, s2, …, name = …, targetState = …)`
+ *      — positional unnamed args are the join states.
+ *   2. Set:    `joinTransition(setOf(s1, s2), name = …, targetState = …)`
+ *      — first positional arg is a `setOf(…)` / `listOf(…)` call; extract its args.
+ *   3. Builder: `joinTransition { joinStates = setOf(s1, s2); … }`
+ *      — states are inside the trailing lambda as a `joinStates = …` assignment.
  */
-private fun KtCallExpression.findJoinSources(): List<String> =
-    valueArgumentList?.arguments.orEmpty()
+private fun KtCallExpression.findJoinSources(): List<String> {
+    val positionalArgs = valueArgumentList?.arguments.orEmpty()
         .filter { it.getArgumentName() == null }
-        .mapNotNull { arg ->
+
+    if (positionalArgs.isNotEmpty()) {
+        val firstExpr = positionalArgs.firstOrNull()?.getArgumentExpression()
+        // Set form: first positional arg is setOf(…) / listOf(…).
+        if (firstExpr is KtCallExpression
+            && firstExpr.calleeExpression?.text.let { it == "setOf" || it == "listOf" }
+        ) {
+            return firstExpr.valueArguments.mapNotNull { arg ->
+                val expr = arg.getArgumentExpression() ?: return@mapNotNull null
+                resolveStateNameFromExpr(expr) ?: expr.targetFallbackText() ?: expr.text
+            }
+        }
+        // Vararg form: each unnamed positional arg is a join state reference.
+        return positionalArgs.mapNotNull { arg ->
             val expr = arg.getArgumentExpression() ?: return@mapNotNull null
             resolveStateNameFromExpr(expr) ?: expr.targetFallbackText() ?: expr.text
         }
+    }
+
+    // Builder form: look for `joinStates = setOf(…)` inside the trailing lambda.
+    val entry = findLambdaAssignmentEntry("joinStates") ?: return emptyList()
+    val rhs = entry.right ?: return emptyList()
+    if (rhs is KtCallExpression
+        && rhs.calleeExpression?.text.let { it == "setOf" || it == "listOf" }
+    ) {
+        return rhs.valueArguments.mapNotNull { arg ->
+            val expr = arg.getArgumentExpression() ?: return@mapNotNull null
+            resolveStateNameFromExpr(expr) ?: expr.targetFallbackText() ?: expr.text
+        }
+    }
+    return emptyList()
+}
 
 private fun StateKind.isData(): Boolean = when (this) {
     StateKind.DATA,
@@ -523,10 +567,10 @@ private fun KtCallExpression.findTargetGroups(): List<TargetGroup> {
         return listOf(TargetGroup(targets = listOf(name), isParallel = false))
     }
 
-    // (2) transitionConditionally — look for `direction = { … }` lambda and walk
+    // (2) *Conditionally variants — look for `direction = { … }` lambda and walk
     // it for targetState / targetParallelStates calls.
     val callee = calleeExpression?.text
-    if (callee == TRANSITION_CONDITIONALLY_CALLEE) {
+    if (callee in CONDITIONALLY_CALLEES) {
         val directionLambda =
             findLambdaAssignmentEntry(DIRECTION_PROPERTY)?.right as? KtLambdaExpression
                 ?: return emptyList()
