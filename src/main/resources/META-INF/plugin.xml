@@ -35,6 +35,23 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.2.0</b>
+        <ul>
+            <li>Zoom support for the diagram view — scroll or pinch to zoom, diagram stays within window bounds.</li>
+            <li>Support for <code>autoTransition</code>, <code>autoTransitionOn</code>,
+                <code>autoTransitionConditionally</code>, <code>autoDataTransition</code>,
+                and <code>autoDataTransitionOn</code> (UML eventless / "always" transitions).</li>
+            <li>Support for extended join-transition family: <code>joinTransitionOn</code>,
+                <code>joinTransitionConditionally</code>, <code>joinDataTransitionOn</code>;
+                join-source extraction for Set and builder-style calling forms.</li>
+            <li>Fixed initial diagram scaling when the tool window first opens.</li>
+            <li>Fixed diagram area not resizing correctly when the IDE window is resized.</li>
+            <li>Fixed a race condition where editing the current file and switching tabs left the plugin
+                showing stale machines, breaking caret-based tree navigation.</li>
+            <li>Fixed plugin getting stuck after a file is renamed.</li>
+            <li>Reduced flickering when switching between PlantUML and Mermaid diagram formats.</li>
+            <li>Fixed Mermaid visual rendering artifacts and minor spacing layout issues.</li>
+        </ul>
         <b>0.1.0</b>
         <ul>
             <li>Initial release.</li>
