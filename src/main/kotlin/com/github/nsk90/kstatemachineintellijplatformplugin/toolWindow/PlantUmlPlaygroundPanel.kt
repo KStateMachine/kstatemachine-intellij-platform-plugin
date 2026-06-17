@@ -117,6 +117,18 @@ class PlantUmlPlaygroundPanel {
 
     val component: JComponent get() = rootPanel
 
+    /** The raw diagram source currently in the editor, or null when empty. */
+    val currentSource: String? get() = sourceArea.text.takeIf { it.isNotBlank() }
+
+    /** Which renderer (PlantUML or Mermaid) is currently active in the playground. */
+    val syntax: DiagramSyntax get() = currentSyntax
+
+    /** SVG from the last completed render, or null if not yet rendered. */
+    val currentSvg: String? get() = when (currentSyntax) {
+        DiagramSyntax.PLANTUML -> plantUmlRenderer.currentSvg
+        DiagramSyntax.MERMAID -> mermaidRenderer.currentSvg
+    }
+
     private val debounceTimer = Timer(DEBOUNCE_MS) { rerender() }.apply { isRepeats = false }
 
     init {

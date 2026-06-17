@@ -147,6 +147,12 @@ class StateMachineDiagramPanel(private val project: Project) {
             renderSelected()
         }
         applyCard(currentSyntax)
+        // Pre-load the browser with a placeholder so the JCEF component is never
+        // blank white while the background file parse is running on first open.
+        // Mirrors the same pattern in PlantUmlPlaygroundPanel.init.
+        ApplicationManager.getApplication().invokeLater {
+            showPlaceholder("Open a Kotlin file with a state machine to start")
+        }
         // Remove the global AWT mouse listeners when this panel is removed from
         // the Swing hierarchy (tool window closed / project closed).
         rootPanel.addHierarchyListener { e ->

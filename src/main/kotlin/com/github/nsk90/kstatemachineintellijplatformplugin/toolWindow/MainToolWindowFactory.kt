@@ -8,6 +8,7 @@ import com.github.nsk90.kstatemachineintellijplatformplugin.services.StateMachin
 import com.github.nsk90.kstatemachineintellijplatformplugin.services.StateMachineViewService
 import com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.actions.CopyPlantUmlAction
 import com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.actions.ExportDiagramAction
+import com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.actions.OpenInOnlineEditorAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.service
@@ -60,17 +61,19 @@ class MainToolWindowFactory : ToolWindowFactory {
         treePanel = StateMachineTreePanel(project)
         diagramPanel = StateMachineDiagramPanel(project)
         playgroundPanel = PlantUmlPlaygroundPanel()
-        project.service<StateMachineViewService>().bind(treePanel, diagramPanel)
+        val service = project.service<StateMachineViewService>()
+        service.bind(treePanel, diagramPanel, playgroundPanel)
 
         val tabs = JBTabbedPane().apply {
             addTab("Structure", treePanel.component)
             addTab("Diagram", diagramPanel.component)
             addTab("Playground", playgroundPanel.component)
+            addChangeListener { service.activeTabIndex = selectedIndex }
         }
 
         val content = ContentFactory.getInstance().createContent(tabs, null, false)
         toolWindow.contentManager.addContent(content)
-        toolWindow.setTitleActions(listOf(CopyPlantUmlAction(), ExportDiagramAction()))
+        toolWindow.setTitleActions(listOf(CopyPlantUmlAction(), ExportDiagramAction(), OpenInOnlineEditorAction()))
 
         toolWindowWorkingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val fileSwitchService = project.service<FileSwitchService>()

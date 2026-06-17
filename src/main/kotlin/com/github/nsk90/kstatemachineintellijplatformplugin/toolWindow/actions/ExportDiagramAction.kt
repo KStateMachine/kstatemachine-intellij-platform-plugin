@@ -1,13 +1,10 @@
 package com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow.actions
 
-import com.github.nsk90.kstatemachineintellijplatformplugin.psi.DiagramSyntax
-import com.github.nsk90.kstatemachineintellijplatformplugin.services.StateMachineViewService
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
@@ -23,8 +20,7 @@ class ExportDiagramAction : AnAction(
 ) {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val panel = project.service<StateMachineViewService>().diagramPanel ?: return
-        if (panel.currentPlantUml == null) return
+        if (activeSourceAndSyntax(project) == null) return
 
         val descriptor = FileSaverDescriptor(
             "Export State Diagram",
@@ -38,11 +34,7 @@ class ExportDiagramAction : AnAction(
         val target = wrapper.file
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val svg = when (panel.currentSyntax) {
-                    DiagramSyntax.PLANTUML -> panel.currentPlantUmlSvg
-                    DiagramSyntax.MERMAID -> panel.currentMermaidSvg
-                }
-                exportSvg(project, target, svg)
+                exportSvg(project, target, activeSvg(project))
                 ApplicationManager.getApplication().invokeLater {
                     Messages.showInfoMessage(project, "Saved to ${target.absolutePath}", "Export Diagram")
                 }
@@ -56,8 +48,6 @@ class ExportDiagramAction : AnAction(
     }
 
     private fun exportSvg(project: Project, target: File, svg: String?) {
-        // PNG-from-JCEF would need viewport screenshot plumbing — out of scope
-        // since the user explicitly chose SVG-only when we dropped plantuml-mit.
         if (target.extension.lowercase() != "svg") {
             ApplicationManager.getApplication().invokeLater {
                 Messages.showWarningDialog(
@@ -75,8 +65,7 @@ class ExportDiagramAction : AnAction(
     }
 
     override fun update(e: AnActionEvent) {
-        val source = e.project?.service<StateMachineViewService>()?.diagramPanel?.currentPlantUml
-        e.presentation.isEnabled = source != null
+        e.presentation.isEnabled = e.project?.let { activeSourceAndSyntax(it) } != null
     }
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
