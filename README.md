@@ -53,6 +53,10 @@ can be copied or exported as SVG.
 
 ---
 
+<video src="./media/demo.mp4" controls width="100%"></video>
+
+---
+
 ## 💾 Install
 
 **From Marketplace** — <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>Marketplace</kbd> → search **"KStateMachine
