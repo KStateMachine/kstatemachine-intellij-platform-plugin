@@ -3,6 +3,7 @@ package com.github.nsk90.kstatemachineintellijplatformplugin.toolWindow
 import com.intellij.ui.JBColor
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
+import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
 import java.awt.AWTEvent
 import java.awt.BorderLayout
@@ -222,8 +223,8 @@ abstract class JcefDiagramRenderer(rendererName: String) {
         private set
 
     protected val svgCaptureQuery: JBCefJSQuery? = browser?.let { b ->
-        @Suppress("DEPRECATION", "UnstableApiUsage")
-        JBCefJSQuery.create(b).apply {
+        @Suppress("UnstableApiUsage")
+        JBCefJSQuery.create(b as JBCefBrowserBase).apply {
             addHandler { svg -> currentSvg = svg; null }
         }
     }
@@ -231,8 +232,8 @@ abstract class JcefDiagramRenderer(rendererName: String) {
     // ── Zoom sync bridge (JS → slider) ────────────────────────────────────────
 
     protected val zoomSyncQuery: JBCefJSQuery? = browser?.let { b ->
-        @Suppress("DEPRECATION", "UnstableApiUsage")
-        JBCefJSQuery.create(b).apply {
+        @Suppress("UnstableApiUsage")
+        JBCefJSQuery.create(b as JBCefBrowserBase).apply {
             addHandler { zoomStr ->
                 val pct = (zoomStr.toDoubleOrNull() ?: 100.0).roundToInt().coerceIn(50, 200)
                 SwingUtilities.invokeLater {
@@ -260,8 +261,8 @@ abstract class JcefDiagramRenderer(rendererName: String) {
     }
 
     protected val readySignalQuery: JBCefJSQuery? = browser?.let { b ->
-        @Suppress("DEPRECATION", "UnstableApiUsage")
-        JBCefJSQuery.create(b).apply {
+        @Suppress("UnstableApiUsage")
+        JBCefJSQuery.create(b as JBCefBrowserBase).apply {
             addHandler { _ ->
                 hideCover()
                 val cb = onReadyOnce
