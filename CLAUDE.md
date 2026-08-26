@@ -47,7 +47,11 @@ The plugin has four layers:
 
 ## IntelliJ Platform Details
 
-- Target platform: IntelliJ Community (IC) 2023.3.8; compatible range 233–242.*
+- Target platform: IntelliJ Ultimate (IU) 2026.2.1; compatible range 262–262.*
+  (2026.1 dropped in 0.3.0: its older JCEF lacks the `CefResourceHandler.open/read/skip` API that
+  2026.2 requires — see `PlantUmlJsRenderer.BundledResourceHandler`)
+- Platform version and build range live in `gradle.properties` (`platformVersion`, `pluginSinceBuild`, `pluginUntilBuild`).
+  When bumping them, also update the compatibility badge and "Compatibility" line in README.md.
 - Declared plugin dependencies: `com.intellij.modules.platform`, `com.intellij.java`, `org.jetbrains.kotlin`
 - Plugin descriptor: `src/main/resources/META-INF/plugin.xml`
 - Localized strings: `src/main/resources/messages/MyBundle.properties` + `MyBundle.kt` wrapper

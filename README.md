@@ -10,7 +10,7 @@ machines straight from your source.**
 [![Build](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/workflows/Build/badge.svg)](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/actions)
 [![Version](https://img.shields.io/jetbrains/plugin/v/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
 [![Downloads](https://img.shields.io/jetbrains/plugin/d/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
-[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2026.1%20%E2%80%93%202026.1*-blue?logo=intellijidea)](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html)
+[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2026.2*-blue?logo=intellijidea)](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html)
 [![Slack](https://img.shields.io/badge/slack-kstatemachine-purple?logo=slack)](https://kotlinlang.slack.com/archives/C07DVAEKLM8)
 
 [💾 Install](#-install) &nbsp;·&nbsp;
@@ -50,6 +50,7 @@ can be copied or exported as SVG.
 - Editor gutter icons next to every KStateMachine DSL call
 - Live, debounced refresh while typing
 - Copy PlantUML source / Export diagram as SVG
+- Open the current diagram in an online editor (plantuml.com / mermaid.live)
 
 ---
 
@@ -67,7 +68,8 @@ Visual"**, or open the [plugin page](https://plugins.jetbrains.com/plugin/32202-
 from [Releases](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/releases/latest) and use <kbd>
 Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> → <kbd>Install plugin from disk…</kbd>.
 
-**Compatibility:** IntelliJ Platform 2026.1+ (Community or Ultimate), bundled Kotlin + Java plugins required.
+**Compatibility:** IntelliJ Platform 2026.2 (Community or Ultimate), bundled Kotlin + Java plugins required.
+On 2026.1 install version 0.2.0 — the Marketplace serves it automatically.
 
 ---
 
@@ -78,7 +80,6 @@ Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> → <kbd>Install plu
 - [ ] Project-wide tab listing every machine across the project
 - [ ] Rename refactoring of state names via the tree
 - [ ] Inspection: unreachable states and missing initial states
-- [ ] Open generated PlantUML in browser (kroki.io / plantuml.com)
 - [ ] In-editor preview balloon anchored to the machine
 
 ---

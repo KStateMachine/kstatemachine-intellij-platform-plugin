@@ -5,9 +5,13 @@ import org.cef.CefApp
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.callback.CefCallback
+import org.cef.callback.CefResourceReadCallback
+import org.cef.callback.CefResourceSkipCallback
 import org.cef.callback.CefSchemeHandlerFactory
 import org.cef.handler.CefResourceHandler
+import org.cef.misc.BoolRef
 import org.cef.misc.IntRef
+import org.cef.misc.LongRef
 import org.cef.misc.StringRef
 import org.cef.network.CefRequest
 import org.cef.network.CefResponse
@@ -175,8 +179,20 @@ private class BundledResourceHandler(
     @Volatile
     private var offset = 0
 
+    // CefResourceHandler carries two generations of the CEF resource API: the
+    // deprecated processRequest/readResponse pair and the current open/read/skip
+    // one. Which of them JCEF calls depends on the bundled CEF build, so both are
+    // implemented — everything is served straight from memory, so both paths are
+    // synchronous and the callbacks are never needed.
+
+    @Suppress("OVERRIDE_DEPRECATION") // kept for platforms whose JCEF still calls the old API
     override fun processRequest(request: CefRequest?, callback: CefCallback?): Boolean {
         callback?.Continue()
+        return true
+    }
+
+    override fun open(request: CefRequest?, handleRequest: BoolRef?, callback: CefCallback?): Boolean {
+        handleRequest?.set(true) // handled synchronously — don't wait for callback.Continue()
         return true
     }
 
@@ -187,12 +203,23 @@ private class BundledResourceHandler(
         responseLength.set(bytes.size)
     }
 
+    @Suppress("OVERRIDE_DEPRECATION") // kept for platforms whose JCEF still calls the old API
     override fun readResponse(
         dataOut: ByteArray,
         bytesToRead: Int,
         bytesRead: IntRef,
         callback: CefCallback?,
-    ): Boolean {
+    ): Boolean = readInto(dataOut, bytesToRead, bytesRead)
+
+    override fun read(
+        dataOut: ByteArray,
+        bytesToRead: Int,
+        bytesRead: IntRef,
+        callback: CefResourceReadCallback?,
+    ): Boolean = readInto(dataOut, bytesToRead, bytesRead)
+
+    /** Copies the next chunk out; returning `false` with `bytesRead == 0` signals completion. */
+    private fun readInto(dataOut: ByteArray, bytesToRead: Int, bytesRead: IntRef): Boolean {
         if (offset >= bytes.size) {
             bytesRead.set(0)
             return false
@@ -204,7 +231,23 @@ private class BundledResourceHandler(
         return true
     }
 
+    override fun skip(bytesToSkip: Long, bytesSkipped: LongRef, callback: CefResourceSkipCallback?): Boolean {
+        val n = minOf(bytesToSkip, (bytes.size - offset).toLong())
+        if (n <= 0) {
+            bytesSkipped.set(ERR_FAILED)
+            return false
+        }
+        offset += n.toInt()
+        bytesSkipped.set(n)
+        return true
+    }
+
     override fun cancel() {}
+
+    private companion object {
+        /** CEF's `ERR_FAILED` — the "skip failed" value expected in `bytesSkipped`. */
+        const val ERR_FAILED = -2L
+    }
 }
 
 /**
