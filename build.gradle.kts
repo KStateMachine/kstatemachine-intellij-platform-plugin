@@ -110,8 +110,12 @@ intellijPlatform {
 
     signing {
         password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
-        privateKeyFile = file("./private-kstatemachine.pem")
-        certificateChainFile = file("./chain.crt")
+        // CI passes the key material in as secrets; locally it is read from the
+        // git-ignored files next to this build script (which CI does not have).
+        privateKey = providers.environmentVariable("PRIVATE_KEY")
+            .orElse(providers.fileContents(layout.projectDirectory.file("private-kstatemachine.pem")).asText)
+        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
+            .orElse(providers.fileContents(layout.projectDirectory.file("chain.crt")).asText)
     }
 
     publishing {

@@ -22,8 +22,8 @@
             <li>Shows guarded and conditional transitions
                 (<code>transitionConditionally</code>, <code>transitionOn</code>)
                 with all statically resolvable target branches.</li>
-            <li>Displays diagrams in PlantUML and Mermaid formats; lets you copy or export the
-                diagram source.</li>
+            <li>Displays diagrams in PlantUML and Mermaid formats; lets you copy, export, or open the
+                diagram in an online editor.</li>
         </ul>
 
         <b>Links</b>
@@ -35,6 +35,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.3.0</b>
+        <ul>
+            <li>New "Open in Online Editor" action — opens the current diagram in plantuml.com or
+                mermaid.live, depending on the selected diagram format.</li>
+            <li>Now targets IntelliJ Platform 2026.2. On 2026.1, stay on version 0.2.0.</li>
+        </ul>
         <b>0.2.0</b>
         <ul>
             <li>Zoom support for the diagram view — scroll or pinch to zoom, diagram stays within window bounds.</li>

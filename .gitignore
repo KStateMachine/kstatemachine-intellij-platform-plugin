@@ -7,3 +7,4 @@ build
 .kotlin/
 private-kstatemachine.pem
 chain.crt
+local.properties

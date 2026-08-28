@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-19
+
+### Added
+
+- "Open in Online Editor" action — opens the current diagram in plantuml.com or mermaid.live, depending on the
+  selected diagram format.
+
+### Changed
+
+- Built against IntelliJ Platform 2026.2.1.
+
+### Removed
+
+- Support for IntelliJ Platform 2026.1 — its JCEF build lacks the resource-handler API that 2026.2
+  requires. 2026.1 users stay on 0.2.0, which the Marketplace keeps serving them.
+
 ## [0.2.0] - 2026-06-16
 
 ### Added
@@ -31,6 +47,7 @@
 
 - Initial scaffold created from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/commits/0.1.0
