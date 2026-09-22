@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-22
+
 ### Added
 
 - Support for IntelliJ Platform 2026.3 — the compatibility range now spans 2026.2–2026.3
@@ -52,7 +54,8 @@
 
 - Initial scaffold created from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 
-[Unreleased]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/commits/v0.1.0
