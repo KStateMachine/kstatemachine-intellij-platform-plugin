@@ -129,7 +129,6 @@ abstract class JcefDiagramRenderer(rendererName: String) {
         val show: () -> Unit = {
             coverPanel.background = coverBackground()
             browserHolder?.let { browserHolderLayout.show(it, COVER_CARD) }
-            Unit
         }
         if (SwingUtilities.isEventDispatchThread()) show() else SwingUtilities.invokeLater(show)
     }
