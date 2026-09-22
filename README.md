@@ -10,7 +10,7 @@ machines straight from your source.**
 [![Build](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/workflows/Build/badge.svg)](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/actions)
 [![Version](https://img.shields.io/jetbrains/plugin/v/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
 [![Downloads](https://img.shields.io/jetbrains/plugin/d/32202-kstatemachine-visual.svg)](https://plugins.jetbrains.com/plugin/32202-kstatemachine-visual)
-[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2026.2*-blue?logo=intellijidea)](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html)
+[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2026.2%20--%202026.3-blue?logo=intellijidea)](https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html)
 [![Slack](https://img.shields.io/badge/slack-kstatemachine-purple?logo=slack)](https://kotlinlang.slack.com/archives/C07DVAEKLM8)
 
 [💾 Install](#-install) &nbsp;·&nbsp;
@@ -68,7 +68,8 @@ Visual"**, or open the [plugin page](https://plugins.jetbrains.com/plugin/32202-
 from [Releases](https://github.com/KStateMachine/kstatemachine-intellij-platform-plugin/releases/latest) and use <kbd>
 Settings</kbd> → <kbd>Plugins</kbd> → <kbd>⚙️</kbd> → <kbd>Install plugin from disk…</kbd>.
 
-**Compatibility:** IntelliJ Platform 2026.2 (Community or Ultimate), bundled Kotlin + Java plugins required.
+**Compatibility:** IntelliJ Platform 2026.2 – 2026.3 (Community or Ultimate), bundled Kotlin + Java plugins
+required.
 On 2026.1 install version 0.2.0 — the Marketplace serves it automatically.
 
 ---

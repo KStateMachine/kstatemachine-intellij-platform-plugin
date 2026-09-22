@@ -200,12 +200,19 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6.3.0
 
+      # Resolve which IDEs the verifier will use, so the cache below can be keyed on them.
+      # (The old key hashed build/listProductsReleases.txt, a file no longer produced by
+      # IntelliJ Platform Gradle Plugin 2.x — the task is now `printProductsReleases` — which
+      # left the key constant and the cache permanently stale.)
+      - name: Resolve Plugin Verifier IDEs
+        run: mkdir -p build && ./gradlew printProductsReleases -q | tee build/productsReleases.txt
+
       # Cache Plugin Verifier IDEs
       - name: Setup Plugin Verifier IDEs Cache
         uses: actions/cache@v6
         with:
           path: ${{ needs.build.outputs.pluginVerifierHomeDir }}/ides
-          key: plugin-verifier-${{ hashFiles('build/listProductsReleases.txt') }}
+          key: plugin-verifier-${{ hashFiles('build/productsReleases.txt') }}
 
       # Run Verify Plugin task and IntelliJ Plugin Verifier tool
       - name: Run Plugin Verification tasks

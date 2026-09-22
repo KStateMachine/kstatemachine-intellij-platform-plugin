@@ -47,9 +47,18 @@ The plugin has four layers:
 
 ## IntelliJ Platform Details
 
-- Target platform: IntelliJ Ultimate (IU) 2026.2.1; compatible range 262–262.*
+- Target platform: compiled against IntelliJ Ultimate (IU) 2026.2.1; compatible range 262–263.*
+  (i.e. 2026.2 through 2026.3). One build serves both branches — the parser and the JCEF renderer
+  use only APIs present in each, confirmed by `verifyPlugin`.
   (2026.1 dropped in 0.3.0: its older JCEF lacks the `CefResourceHandler.open/read/skip` API that
   2026.2 requires — see `PlantUmlJsRenderer.BundledResourceHandler`)
+- Do not bump `platformVersion` to 2026.2.3: that IU build crashes `BasePlatformTestCase` project
+  startup inside an obfuscated `com.intellij.modules.ultimate` post-startup activity
+  ("Cannot find suitable constructor for class Z.Z.Z.Z.Z"), which fails all 115 tests. Not our
+  bug, and not a runtime problem — only the test harness. Recheck on the next patch release.
+- While 2026.3 is EAP-only, `pluginVerification.ides.recommended()` resolves released IDEs only and
+  would skip the 263 branch entirely, so `build.gradle.kts` adds a `select {}` for the latest 263
+  EAP. Remove that block once 2026.3 ships.
 - Platform version and build range live in `gradle.properties` (`platformVersion`, `pluginSinceBuild`, `pluginUntilBuild`).
   When bumping them, also update the compatibility badge and "Compatibility" line in README.md.
 - Declared plugin dependencies: `com.intellij.modules.platform`, `com.intellij.java`, `org.jetbrains.kotlin`

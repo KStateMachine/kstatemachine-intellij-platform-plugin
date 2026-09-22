@@ -1,6 +1,8 @@
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.changelog.markdownToHTML
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.intellij.platform.gradle.models.ProductRelease
 
 plugins {
     id("java") // Java support
@@ -129,6 +131,17 @@ intellijPlatform {
     pluginVerification {
         ides {
             recommended()
+            // `recommended()` only resolves *released* IDEs, so while 2026.3 is EAP-only it
+            // leaves the whole 263 branch — the top of our compatibility range — unverified.
+            // Select the latest 263 EAP explicitly rather than pinning one build, so CI keeps
+            // working as EAPs are superseded and withdrawn. Drop this block once 2026.3 ships
+            // and `recommended()` covers 263 on its own.
+            select {
+                types = listOf(IntelliJPlatformType.IntellijIdeaUltimate)
+                channels = listOf(ProductRelease.Channel.EAP)
+                sinceBuild = "263"
+                untilBuild = "263.*"
+            }
         }
     }
 }

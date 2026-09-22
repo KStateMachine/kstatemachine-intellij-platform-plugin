@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Support for IntelliJ Platform 2026.3 — the compatibility range now spans 2026.2–2026.3
+  (builds 262–263.*). A single build serves both; 2026.2 users are unaffected.
+
 ## [0.3.0] - 2026-08-19
 
 ### Added
